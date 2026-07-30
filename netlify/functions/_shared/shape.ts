@@ -104,6 +104,31 @@ export function buildPublic(raw: Raw) {
   const advance = monthly.slice(monthsDone).reduce((s, v) => s + v, 0);
   const projInflow = (avgColl - avgExp) * (12 - monthsDone) - advance;
 
+  /* Month-end fund balance: actual while the month is complete, projected after.
+     The actual arm deliberately excludes collections banked in advance for
+     months that have not happened yet — counting them early would overstate the
+     balance today and then double-count them in the projection. Undated ledger
+     rows are applied at the start of the year, which is the only defensible
+     place for them. */
+  const txByMonth = new Array(12).fill(0);
+  for (const t of transactions) {
+    const m = t.txDate ? new Date(t.txDate + "T00:00:00Z").getUTCMonth() : 0;
+    txByMonth[Number.isFinite(m) && m >= 0 && m < 12 ? m : 0] += num(t.amount);
+  }
+
+  const balanceSeries: { month: string; value: number; projected: boolean }[] = [];
+  let running = bf;
+  const step = avgColl - avgExp;
+  for (let m = 0; m < 12; m++) {
+    const isProjected = m >= monthsDone;
+    running += isProjected ? step : monthly[m] + txByMonth[m];
+    balanceSeries.push({
+      month: MONTHS[m],
+      value: round2(running),
+      projected: isProjected,
+    });
+  }
+
   return {
     societyName: settings.society_name ?? "Prime Aurora Welfare Society",
     year, months: MONTHS, monthsDone, fee,
@@ -120,6 +145,7 @@ export function buildPublic(raw: Raw) {
     avgColl: round2(avgColl), avgExp: round2(avgExp), advance,
     projInflow: round2(projInflow),
     projBalance: round2(fundBalance + projInflow),
+    balanceSeries,
     // ledger descriptions are committee-authored; they are shown publicly, so
     // the editor UI warns against putting personal names in them
     transactions: transactions.map((t) => ({

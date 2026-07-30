@@ -101,6 +101,11 @@
   .kpi.accent { border-left: 3px solid var(--series-1); }
   .kpi.warn   { border-left: 3px solid var(--critical); }
   .kpi.ok     { border-left: 3px solid var(--good); }
+  /* Status is written as well as coloured — the dot alone never carries it. */
+  .kpi .status { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px;
+    font-size: 12px; font-weight: 560; color: var(--ink-2); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+    flex: 0 0 auto; margin-right: 6px; vertical-align: baseline; }
 
   /* ---------- layout ---------- */
   /* min-width:0 lets a grid/flex child shrink past its content so the
@@ -179,13 +184,25 @@
 </style>
 </head>
 <body>
+<script>
+/* Netlify Identity mails invite, recovery and confirmation links pointing at the
+   site root, but the code that consumes those tokens lives on /editor. Forward
+   them there, hash intact, before anything else runs — otherwise the link looks
+   broken: the dashboard loads and silently ignores the token. */
+(function () {
+  var h = window.location.hash || "";
+  if (/^#(?:.*&)?(invite_token|recovery_token|confirmation_token|email_change_token)=/.test(h)) {
+    window.location.replace("/editor" + h);
+  }
+})();
+</script>
 <div id="tip" role="status" aria-live="polite"></div>
 
 <div class="wrap">
   <header class="top">
     <div>
       <h1>Prime Aurora Welfare Society</h1>
-      <p class="sub">Fund dashboard for 2026 &middot; figures in Sri&nbsp;Lankan rupees &middot; as at 30&nbsp;July&nbsp;2026<br>
+      <p class="sub" id="subtitle">Figures in Sri&nbsp;Lankan rupees.<br>
         Plots are identified by number only — no household names appear on this page.</p>
     </div>
     <div class="head-actions">
@@ -202,9 +219,13 @@
     <div class="card">
       <h2>Monthly collections against target</h2>
       <p class="note">Bars are money actually banked. The dashed line is the full monthly target — Rs.&nbsp;3,000 from each of the 57 occupied households.</p>
-      <ul class="legend">
-        <li><span class="swatch" style="background:var(--series-1)"></span>Collected</li>
-        <li><span class="swatch line"></span>Target (Rs.&nbsp;171,000)</li>
+      <ul class="legend" id="legend-monthly">
+        <li><span class="swatch" style="background:var(--good)"></span>On track (80%+)</li>
+        <li><span class="swatch" style="background:var(--warning)"></span>Below target (50–79%)</li>
+        <li><span class="swatch" style="background:var(--serious)"></span>Well below (25–49%)</li>
+        <li><span class="swatch" style="background:var(--critical)"></span>Critical (under 25%)</li>
+        <li><span class="swatch" style="background:var(--series-1);opacity:.42"></span>Advance, month not reached</li>
+        <li><span class="swatch line"></span>Target</li>
       </ul>
       <div class="chart-scroll"><svg class="chart" id="c-monthly" role="img" aria-label="Monthly collections against the Rs. 171,000 target"></svg></div>
       <p class="cnote">Solid bars are completed months, January to July. Pale bars are advance payments already banked for months still to come.</p>
@@ -219,10 +240,23 @@
     </div>
   </section>
 
+  <section class="card">
+    <h2>Fund balance through the year</h2>
+    <p class="note">Where the fund stands at each month end, and where it lands if nothing changes.</p>
+    <ul class="legend">
+      <li><span class="swatch" style="background:var(--series-1)"></span>Actual, month complete</li>
+      <li><span class="swatch line" style="border-top-color:var(--series-3)"></span>Projected</li>
+    </ul>
+    <div class="chart-scroll"><svg class="chart" id="c-balance" role="img"
+      aria-label="Fund balance at each month end, actual then projected"></svg></div>
+    <p class="cnote" id="balance-note"></p>
+    <details class="tv"><summary>Show as a table</summary><div class="tbl-scroll" id="t-balance"></div></details>
+  </section>
+
   <section class="grid2 even">
     <div class="card">
-      <h2>Payment behaviour of the 57 occupied households</h2>
-      <p class="note">Measured across the seven completed months, January to July.</p>
+      <h2 id="behaviour-title">Payment behaviour of the occupied households</h2>
+      <p class="note" id="behaviour-note">Measured across the completed months.</p>
       <div class="stat-strip" id="behaviour"></div>
       <div class="chart-scroll" style="margin-top:16px"><svg class="chart" id="c-behaviour" role="img" aria-label="Share of occupied households paying fully, partly, or not at all"></svg></div>
       <p class="cnote">Left to right: paid in full, paid partly, paid nothing.</p>
@@ -373,22 +407,58 @@
   const D = DATA;
   const rateYtd = D.ytdColl / D.ytdExp;
 
+  /* Status banding for a collection rate. Uses the reserved status palette, and
+     every use pairs the colour with a written label — colour never carries the
+     meaning on its own. Applied only to COMPLETED months: a month that has not
+     happened yet holds nothing but advance payments, and grading it "critical"
+     would report a problem that does not exist. */
+  function rateBand(rate) {
+    if (rate >= 0.8)  return { label: "On track",      color: "var(--good)" };
+    if (rate >= 0.5)  return { label: "Below target",  color: "var(--warning)" };
+    if (rate >= 0.25) return { label: "Well below",    color: "var(--serious)" };
+    return              { label: "Critical",           color: "var(--critical)" };
+  }
+
+  /* Dated from the server response rather than written into the markup, so it
+     cannot quietly go stale the way a hardcoded date does. */
+  (function () {
+    document.title = D.societyName + " — Fund Dashboard " + D.year;
+    $("h1").textContent = D.societyName;
+    const asAt = new Date(D.updatedAt).toLocaleDateString("en-GB",
+      { day: "numeric", month: "long", year: "numeric" });
+    $("#subtitle").innerHTML =
+      "Fund dashboard for " + D.year + " &middot; figures in Sri&nbsp;Lankan rupees &middot; as at " +
+      esc(asAt) + "<br>Plots are identified by number only — no household names appear on this page.";
+  })();
+
+  const ytdBand = rateBand(rateYtd);
+  const through = D.months[Math.max(0, D.monthsDone - 1)];
+  const growing = D.projBalance >= D.fundBalance;
+
   const kpis = [
-    { cls: "accent", label: "Fund balance today",       val: fmt2(D.fundBalance), cur: "Rs.",
-      meta: "2025 balance forward, plus 2026 collections and other income, less expenditure" },
-    { cls: "",       label: "Collected in 2026",         val: fmt0(D.collections2026), cur: "Rs.",
+    { cls: "accent", label: "Fund balance today", val: fmt2(D.fundBalance), cur: "Rs.",
+      meta: "2025 balance forward, plus " + D.year + " collections and other income, less expenditure" },
+    { cls: "", label: "Collected in " + D.year, val: fmt0(D.collections2026), cur: "Rs.",
       meta: "Membership fees banked across all twelve months" },
-    { cls: rateYtd >= 0.6 ? "ok" : "warn", label: "Collection rate, Jan–Jul", val: pct1(rateYtd), cur: "",
-      meta: "Rs. " + fmt0(D.ytdColl) + " received of Rs. " + fmt0(D.ytdExp) + " due" },
-    { cls: "warn",   label: "Arrears, Jan–Jul",          val: fmt0(D.arrears), cur: "Rs.",
-      meta: D.zeroPayers.length + " occupied households have paid nothing at all" },
-    { cls: "",       label: "Projected 31 Dec balance",  val: fmt0(D.projBalance), cur: "Rs.",
-      meta: "Indicative — assumes the Jan–Jul average continues" }
+    { cls: rateYtd >= 0.8 ? "ok" : "warn", label: "Collection rate, Jan–" + through.slice(0, 3),
+      val: pct1(rateYtd), cur: "",
+      meta: "Rs. " + fmt0(D.ytdColl) + " received of Rs. " + fmt0(D.ytdExp) + " due",
+      status: { label: ytdBand.label, color: ytdBand.color } },
+    { cls: "warn", label: "Arrears, Jan–" + through.slice(0, 3), val: fmt0(D.arrears), cur: "Rs.",
+      meta: D.zeroPayers.length + " occupied households have paid nothing at all",
+      status: { label: pct1(D.arrears / D.ytdExp) + " of what was due is unpaid", color: "var(--critical)" } },
+    { cls: growing ? "ok" : "warn", label: "Projected 31 Dec balance", val: fmt0(D.projBalance), cur: "Rs.",
+      meta: "Indicative — assumes the Jan–" + through.slice(0, 3) + " average continues",
+      status: { label: (growing ? "Growing by Rs. " : "Falling by Rs. ") + fmt0(Math.abs(D.projInflow)),
+                color: growing ? "var(--good)" : "var(--critical)" } }
   ];
   $("#kpis").innerHTML = kpis.map((k) =>
-    '<div class="kpi ' + k.cls + '"><div class="label">' + k.label + '</div>' +
+    '<div class="kpi ' + k.cls + '"><div class="label">' + esc(k.label) + '</div>' +
     '<div class="val">' + (k.cur ? '<span class="cur">' + k.cur + "</span>" : "") + k.val + "</div>" +
-    '<div class="meta">' + k.meta + "</div></div>"
+    '<div class="meta">' + esc(k.meta) + "</div>" +
+    (k.status ? '<div class="status"><span class="dot" style="background:' + k.status.color +
+      '"></span>' + esc(k.status.label) + "</div>" : "") +
+    "</div>"
   ).join("");
 
   /* --------------------------------------------- chart 1: monthly vs target */
@@ -412,21 +482,22 @@
       const cx = M.l + band * i + band / 2;
       const x = cx - bw / 2, h = Math.max(v > 0 ? 2 : 0, (v / top) * ih);
       const done = i < D.monthsDone;
+      const status = done ? rateBand(v / target) : null;
       const mark = el("path", {
         class: "mark",
         d: dataBar(x, y(v), bw, h, 4, "up"),
-        fill: "var(--series-1)",
+        fill: status ? status.color : "var(--series-1)",
         "fill-opacity": done ? 1 : 0.42
       });
       svg.appendChild(mark);
       const hit = el("rect", { class: "hit", x: cx - band / 2, y: M.t, width: band, height: ih });
       svg.appendChild(hit);
-      hover(hit, mark, D.months[i] + " 2026", [
+      hover(hit, mark, D.months[i] + " " + D.year, [
         ["Collected", "Rs. " + fmt0(v)],
         ["Target", "Rs. " + fmt0(target)],
         ["Rate", pct1(v / target)],
         ["Households paid", D.paid[i] + " of " + D.occupied],
-        ["Status", done ? "Month complete" : "Advance payments only"]
+        ["Status", status ? status.label : "Month not reached — advance payments only"]
       ]);
       svg.appendChild(el("text", { class: "cat", x: cx, y: H - 24, "text-anchor": "middle" }, D.months[i].slice(0, 3)));
       if (v > 0) svg.appendChild(el("text", { class: "vlabel", x: cx, y: y(v) - 7, "text-anchor": "middle" }, compact(v)));
@@ -440,16 +511,103 @@
     /* table view — also the relief for the sub-3:1 swatch rule */
     let rows = "";
     D.monthly.forEach((v, i) => {
+      const done = i < D.monthsDone;
+      const s = done ? rateBand(v / target) : null;
       rows += "<tr><td>" + D.months[i] + "</td><td class='num'>" + fmt0(v) +
               "</td><td class='num'>" + fmt0(target) + "</td><td class='num'>" + pct1(v / target) +
-              "</td><td class='num'>" + D.paid[i] + "</td></tr>";
+              "</td><td class='num'>" + D.paid[i] + "</td><td>" +
+              (s ? "<span class='dot' style='background:" + s.color + "'></span>" + esc(s.label)
+                 : "<span class='muted'>Not reached</span>") +
+              "</td></tr>";
     });
     $("#t-monthly").innerHTML =
       "<table><thead><tr><th>Month</th><th class='num'>Collected</th><th class='num'>Target</th>" +
-      "<th class='num'>Rate</th><th class='num'>Paid</th></tr></thead><tbody>" + rows +
+      "<th class='num'>Rate</th><th class='num'>Paid</th><th>Status</th></tr></thead><tbody>" + rows +
       "<tr class='total'><td>Total</td><td class='num'>" + fmt0(D.collections2026) +
       "</td><td class='num'>" + fmt0(target * 12) + "</td><td class='num'>" +
-      pct1(D.collections2026 / (target * 12)) + "</td><td class='num'>—</td></tr></tbody></table>";
+      pct1(D.collections2026 / (target * 12)) + "</td><td class='num'>—</td><td></td></tr></tbody></table>";
+  })();
+
+  /* -------------------------------------- chart 1b: balance, actual + projected */
+  (function () {
+    const svg = $("#c-balance");
+    const S = D.balanceSeries || [];
+    if (!S.length) return;
+
+    const W = 720, H = 300, M = { t: 20, r: 58, b: 40, l: 60 };
+    const iw = W - M.l - M.r, ih = H - M.t - M.b;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+
+    const vals = S.map((p) => p.value);
+    const lo = Math.min(0, Math.min.apply(null, vals));
+    const { step, top } = niceScale(Math.max.apply(null, vals) * 1.08, 4);
+    const y = (v) => M.t + ih - ((v - lo) / (top - lo)) * ih;
+    const x = (i) => M.l + (iw / 11) * i;
+
+    for (let v = lo; v <= top + 1e-6; v += step) {
+      svg.appendChild(el("line", { class: v === 0 ? "baseline" : "gridline", x1: M.l, x2: M.l + iw, y1: y(v), y2: y(v) }));
+      svg.appendChild(el("text", { class: "tick", x: M.l - 9, y: y(v) + 4, "text-anchor": "end" }, compact(v)));
+    }
+
+    /* Split into an actual arm and a projected arm that share the handover
+       point, so the line is continuous but the two are visually distinct. */
+    const lastActual = Math.max(0, D.monthsDone - 1);
+    const path = (from, to) => S.slice(from, to + 1)
+      .map((p, k) => (k === 0 ? "M" : "L") + x(from + k) + "," + y(p.value)).join("");
+
+    svg.appendChild(el("path", {
+      d: path(0, lastActual), fill: "none", stroke: "var(--series-1)",
+      "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round",
+    }));
+    if (lastActual < 11) {
+      svg.appendChild(el("path", {
+        d: path(lastActual, 11), fill: "none", stroke: "var(--series-3)",
+        "stroke-width": 2, "stroke-dasharray": "5 4", "stroke-linecap": "round",
+      }));
+    }
+
+    S.forEach((p, i) => {
+      const isProj = p.projected;
+      const mark = el("circle", {
+        class: "mark", cx: x(i), cy: y(p.value), r: i === 11 || i === lastActual ? 4.5 : 3.5,
+        fill: isProj ? "var(--series-3)" : "var(--series-1)",
+        stroke: "var(--surface)", "stroke-width": 2,
+      });
+      svg.appendChild(mark);
+      const hit = el("rect", { class: "hit", x: x(i) - iw / 22, y: M.t, width: iw / 11, height: ih });
+      svg.appendChild(hit);
+      hover(hit, mark, p.month + " " + D.year, [
+        [isProj ? "Projected balance" : "Actual balance", "Rs. " + fmt0(p.value)],
+        ["Basis", isProj ? "Jan–" + D.months[lastActual].slice(0, 3) + " average" : "Recorded"],
+      ]);
+      if (i % 2 === 0 || i === 11) {
+        svg.appendChild(el("text", { class: "cat", x: x(i), y: H - 22, "text-anchor": "middle" },
+          p.month.slice(0, 3)));
+      }
+    });
+
+    /* Label only the two points that carry the story. */
+    svg.appendChild(el("text", {
+      class: "vlabel", x: x(lastActual), y: y(S[lastActual].value) - 11, "text-anchor": "middle",
+      fill: "var(--series-1)",
+    }, compact(S[lastActual].value)));
+    svg.appendChild(el("text", {
+      class: "vlabel", x: x(11) + 6, y: y(S[11].value) + 4, fill: "var(--series-3)",
+    }, compact(S[11].value)));
+
+    const dir = S[11].value >= S[lastActual].value ? "grow" : "fall";
+    $("#balance-note").textContent =
+      "Actual through " + D.months[lastActual] + ", then projected at the completed-month average of Rs. " +
+      fmt0(D.avgColl) + " collected and Rs. " + fmt0(D.avgExp) + " spent per month. On that basis the fund would " +
+      (dir === "grow" ? "grow to Rs. " : "fall to Rs. ") + fmt0(S[11].value) +
+      " by December. Advance payments already banked for later months are held back from the actual line so they are not counted twice.";
+
+    $("#t-balance").innerHTML =
+      "<table><thead><tr><th>Month end</th><th class='num'>Balance (Rs.)</th><th>Basis</th></tr></thead><tbody>" +
+      S.map((p) => "<tr><td>" + esc(p.month) + "</td><td class='num'>" + fmt0(p.value) + "</td><td>" +
+        (p.projected ? "<span class='dot' style='background:var(--series-3)'></span>Projected"
+                     : "<span class='dot' style='background:var(--series-1)'></span>Actual") +
+        "</td></tr>").join("") + "</tbody></table>";
   })();
 
   /* ------------------------------------------------- chart 2: households paid */
@@ -486,6 +644,18 @@
       svg.appendChild(el("text", { class: "cat", x: cx, y: H - 10, "text-anchor": "middle", "font-size": "10.5" }, D.months[i].slice(0, 1)));
       if (v > 0) svg.appendChild(el("text", { class: "vlabel", x: cx, y: y(v) - 6, "text-anchor": "middle" }, v));
     });
+  })();
+
+  /* Headings that quote live counts — these change the moment an editor marks a
+     plot occupied or advances the month, so they are never hardcoded. */
+  (function () {
+    const through = D.months[Math.max(0, D.monthsDone - 1)];
+    $("#behaviour-title").textContent =
+      "Payment behaviour of the " + D.occupied + " occupied households";
+    $("#behaviour-note").textContent =
+      D.monthsDone === 1
+        ? "Measured across the one completed month, January."
+        : "Measured across the " + D.monthsDone + " completed months, January to " + through + ".";
   })();
 
   /* ---------------------------------------- chart 3: payment behaviour split */
