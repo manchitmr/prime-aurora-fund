@@ -30,6 +30,7 @@ const pillClass = (t) => (t === "Expense" ? "exp" : t === "Donation" ? "don" : "
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const STATUSES = ["Occupied", "Unregistered", "Pending", "Bare Land", "Vacant House"];
 const CATEGORIES = ["Dansal / Events", "Utilities", "Cleaning", "Bank",
+  "Bank Interest", "Withholding Tax", "Online Bank Charges",
   "Maintenance", "Security", "Membership", "Other"];
 /* Contribution and Donation are both money in; Expense is money out. */
 const TX_TYPES = ["Contribution", "Donation", "Expense"];
@@ -715,6 +716,6 @@ $("#dl-pdf").addEventListener("click", () => window.print());
 
 // Brand mark in the header, and the shared brand colour variables.
 document.head.append(el("style", {}, BRAND_CSS));
-$("#brand").innerHTML = brandSvg("mark", 34);
+$("#brand").innerHTML = brandSvg("full", 112);
 
 boot().catch((err) => showError(err.message));

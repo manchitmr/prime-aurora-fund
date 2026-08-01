@@ -1,4 +1,4 @@
-var PABrand=(()=>{var r=Object.defineProperty;var i=Object.getOwnPropertyDescriptor;var o=Object.getOwnPropertyNames;var p=Object.prototype.hasOwnProperty;var l=(e,a)=>{for(var n in a)r(e,n,{get:a[n],enumerable:!0})},s=(e,a,n,d)=>{if(a&&typeof a=="object"||typeof a=="function")for(let t of o(a))!p.call(e,t)&&t!==n&&r(e,t,{get:()=>a[t],enumerable:!(d=i(a,t))||d.enumerable});return e};var g=e=>s(r({},"__esModule",{value:!0}),e);var b={};l(b,{BRAND_CSS:()=>h,brandSvg:()=>x});var h=`
+var PABrand=(()=>{var r=Object.defineProperty;var i=Object.getOwnPropertyDescriptor;var o=Object.getOwnPropertyNames;var p=Object.prototype.hasOwnProperty;var l=(e,a)=>{for(var t in a)r(e,t,{get:a[t],enumerable:!0})},s=(e,a,t,d)=>{if(a&&typeof a=="object"||typeof a=="function")for(let n of o(a))!p.call(e,n)&&n!==t&&r(e,n,{get:()=>a[n],enumerable:!(d=i(a,n))||d.enumerable});return e};var g=e=>s(r({},"__esModule",{value:!0}),e);var c={};l(c,{BRAND_CSS:()=>h,brandSvg:()=>x});var h=`
   .brand { display: inline-flex; align-items: center; gap: 12px; }
   .brand img { display: block; height: auto; width: auto; }
   .brand-stack { flex-direction: column; gap: 10px; text-align: center; }
@@ -29,4 +29,4 @@ var PABrand=(()=>{var r=Object.defineProperty;var i=Object.getOwnPropertyDescrip
   }
 `;function x(e="mark",a=38){return e==="mark"?`<span class="brand-plate"><img src="/logo-mark.png" alt="Prime Aurora"
       style="height:${a}px" width="189" height="172"></span>`:`<span class="brand-plate"><img src="/logo.png" alt="Prime Aurora, Mattegoda"
-    style="width:${a*2.4}px" width="289" height="363"></span>`}return g(b);})();
+    style="width:${Math.min(a,289)}px" width="289" height="363"></span>`}return g(c);})();

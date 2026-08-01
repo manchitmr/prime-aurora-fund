@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Prime Aurora Welfare Society — Fund Dashboard 2026</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/favicon.png">
 <style>
   *, *::before, *::after { box-sizing: border-box; }
   :root {
@@ -71,7 +73,9 @@
   .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 72px; }
 
   /* ---------- header ---------- */
-  header.top { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; justify-content: space-between; margin-bottom: 26px; }
+  header.top { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; justify-content: space-between; margin-bottom: 26px; }
+  header.top .brand { align-items: center; }
+  @media (max-width: 640px) { header.top .brand img { width: 104px !important; } }
   h1 { margin: 0 0 6px; font-size: clamp(22px, 3.4vw, 30px); font-weight: 640; letter-spacing: -0.02em; line-height: 1.15; }
   .sub { margin: 0; color: var(--ink-2); font-size: 14px; }
   /* Four actions no longer fit on a phone in one row, so they wrap. */
@@ -876,7 +880,7 @@
 
   /* -------------------------------------------------------- brand & print */
   document.head.insertAdjacentHTML("beforeend", "<style>" + PABrand.BRAND_CSS + "</style>");
-  $("#brand").innerHTML = PABrand.brandSvg("mark", 38);
+  $("#brand").innerHTML = PABrand.brandSvg("full", 132);
   $("#dl-pdf").addEventListener("click", function () { window.print(); });
 
   /* ---------------------------------------------------------------- theme */
