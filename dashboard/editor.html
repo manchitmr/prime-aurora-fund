@@ -11,7 +11,7 @@
     color-scheme: light;
     --plane:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink-2:#52514e; --ink-muted:#898781;
     --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10);
-    --brand:#2a78d6; --good:#0ca30c; --good-text:#006300; --critical:#d03b3b; --warning:#fab219;
+    --brand:#2a78d6; --brand-blue:#2a78d6; --good:#0ca30c; --good-text:#006300; --critical:#d03b3b; --warning:#fab219;
     --shadow:0 1px 2px rgba(11,11,11,.04), 0 8px 24px -12px rgba(11,11,11,.12);
   }
   @media (prefers-color-scheme: dark) {
@@ -19,7 +19,7 @@
       color-scheme: dark;
       --plane:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink-2:#c3c2b7; --ink-muted:#898781;
       --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
-      --brand:#3987e5; --good-text:#0ca30c;
+      --brand:#3987e5; --brand-blue:#3987e5; --good-text:#0ca30c;
       --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
     }
   }
@@ -74,10 +74,11 @@
 
   .tbl-scroll { overflow-x:auto; }
   table { border-collapse:collapse; width:100%; font-size:13.5px; }
-  th, td { text-align:left; padding:8px 12px 8px 0; border-bottom:1px solid var(--grid); vertical-align:middle; }
+  th, td { text-align:left; padding:8px 18px 8px 0; border-bottom:1px solid var(--grid); vertical-align:middle; }
   th { font-size:11.5px; font-weight:620; letter-spacing:.03em; text-transform:uppercase;
     color:var(--ink-muted); border-bottom-color:var(--axis); white-space:nowrap; }
-  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; padding-right:0; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  th:last-child, td:last-child { padding-right:0; }
   .nowrap { white-space:nowrap; }
   .strong { font-weight:620; }
   tbody tr:hover td { background:color-mix(in oklab, var(--brand) 5%, transparent); }
@@ -112,8 +113,8 @@
 
   .pill { display:inline-block; padding:1.5px 8px; border-radius:999px; font-size:11.5px;
     font-weight:560; border:1px solid var(--border); white-space:nowrap; }
-  .pill.inc { color:var(--good-text); border-color:color-mix(in oklab,var(--good) 45%,transparent); }
-  .pill.don { color:var(--brand-red); border-color:color-mix(in oklab,var(--brand-red) 45%,transparent); }
+  .pill.inc { color:var(--brand-blue); border-color:color-mix(in oklab,var(--brand-blue) 50%,transparent); }
+  .pill.don { color:var(--good-text); border-color:color-mix(in oklab,var(--good) 50%,transparent); }
   .pill.exp { color:var(--critical); border-color:color-mix(in oklab,var(--critical) 45%,transparent); }
 
   .btn.wide { width:100%; justify-content:center; }
