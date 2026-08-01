@@ -242,7 +242,7 @@
   <section class="grid2 split">
     <div class="card">
       <h2>Monthly collections against target</h2>
-      <p class="note">Bars are money actually banked. The dashed line is the full monthly target — Rs.&nbsp;3,000 from each of the 57 occupied households.</p>
+      <p class="note" id="note-monthly">Bars are money actually banked. The dashed line is the full monthly target.</p>
       <ul class="legend" id="legend-monthly">
         <li><span class="swatch" style="background:var(--good)"></span>On track (80%+)</li>
         <li><span class="swatch" style="background:var(--warning)"></span>Below target (50–79%)</li>
@@ -258,7 +258,7 @@
 
     <div class="card">
       <h2>Households paying each month</h2>
-      <p class="note">Count of plots that recorded a payment, out of 57 occupied households.</p>
+      <p class="note" id="note-paid">Count of plots that recorded a payment.</p>
       <div class="chart-scroll"><svg class="chart" id="c-paid" role="img" aria-label="Number of households paying in each month of 2026"></svg></div>
       <p class="cnote">Months run January to December. Pale bars are advance payments for months still to come.</p>
     </div>
@@ -300,7 +300,7 @@
 
   <section class="card">
     <h2>Plot register</h2>
-    <p class="note">All 122 plots by occupancy status. Only the 57 occupied households carry a fee obligation.</p>
+    <p class="note" id="note-status">Plots by occupancy status.</p>
     <div class="chart-scroll"><svg class="chart" id="c-status" role="img" aria-label="Breakdown of the 122 plots by status"></svg></div>
   </section>
 
@@ -677,6 +677,14 @@
     const through = D.months[Math.max(0, D.monthsDone - 1)];
     $("#behaviour-title").textContent =
       "Payment behaviour of the " + D.occupied + " occupied households";
+    $("#note-monthly").textContent =
+      "Bars are money actually banked. The dashed line is the full monthly target — Rs. " +
+      fmt0(D.fee) + " from each of the " + D.occupied + " occupied households.";
+    $("#note-paid").textContent =
+      "Count of plots that recorded a payment, out of " + D.occupied + " occupied households.";
+    $("#note-status").textContent =
+      "All " + D.plots + " plots by occupancy status. Only the " + D.occupied +
+      " occupied households carry a fee obligation.";
     $("#behaviour-note").textContent =
       D.monthsDone === 1
         ? "Measured across the one completed month, January."
@@ -820,7 +828,7 @@
     "</tbody></table>";
 
   $("#zero-note").textContent =
-    D.zeroPayers.length + " of the 57 occupied households, representing Rs. " +
+    D.zeroPayers.length + " of the " + D.occupied + " occupied households, representing Rs. " +
     fmt0(D.zeroPayers.length * D.fee * D.monthsDone) + " of the Rs. " + fmt0(D.arrears) +
     " arrears to July.";
   $("#t-zero").innerHTML =
