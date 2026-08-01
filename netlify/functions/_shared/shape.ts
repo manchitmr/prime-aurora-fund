@@ -64,10 +64,16 @@ export function buildPublic(raw: Raw) {
   const bf = plots.reduce((s, p) => s + num(p.bf2025), 0);
   const collectionsTotal = monthly.reduce((s, v) => s + v, 0);
 
+  /* Anything that is not an Expense is an inflow. Written this way round on
+     purpose: if a new inflow label is added later, the fund balance stays
+     correct by default instead of silently dropping the new category. */
   let otherIncome = 0, expenses = 0;
+  const byType: Record<string, number> = {};
   for (const t of transactions) {
-    if (t.type === "Income") otherIncome += num(t.amount);
-    else if (t.type === "Expense") expenses += num(t.amount);
+    const v = num(t.amount);
+    byType[t.type] = (byType[t.type] ?? 0) + v;
+    if (t.type === "Expense") expenses += v;
+    else otherIncome += v;
   }
   const fundBalance = bf + collectionsTotal + otherIncome + expenses;
 
@@ -137,6 +143,7 @@ export function buildPublic(raw: Raw) {
     bf, collections2026: collectionsTotal,
     otherIncome: round2(otherIncome),
     expenses: round2(expenses),
+    byType: Object.fromEntries(Object.entries(byType).map(([k, v]) => [k, round2(v)])),
     fundBalance: round2(fundBalance),
     ytdColl, ytdExp, arrears: ytdExp - ytdColl,
     zeroPayers, fullPayers,

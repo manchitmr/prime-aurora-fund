@@ -1,7 +1,8 @@
 import {
-  login, logout, getUser, handleAuthCallback, acceptInvite,
-  recoverPassword, requestPasswordRecovery, updateUser, AuthError,
+  login, logout, handleAuthCallback, acceptInvite, hydrateSession,
+  requestPasswordRecovery, updateUser, oauthLogin, getSettings, AuthError,
 } from "@netlify/identity";
+import { BRAND_CSS, brandSvg } from "./brand.js";
 
 /* ------------------------------------------------------------------ utils */
 
@@ -24,9 +25,14 @@ const money = (n) =>
   n == null ? "" : Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const int = (n) => (n == null ? "" : Math.round(Number(n)).toLocaleString("en-US"));
 
+const pillClass = (t) => (t === "Expense" ? "exp" : t === "Donation" ? "don" : "inc");
+
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const STATUSES = ["Occupied", "Unregistered", "Pending", "Bare Land", "Vacant House"];
-const CATEGORIES = ["Dansal / Events", "Utilities", "Cleaning", "Bank", "Maintenance", "Security", "Other"];
+const CATEGORIES = ["Dansal / Events", "Utilities", "Cleaning", "Bank",
+  "Maintenance", "Security", "Membership", "Other"];
+/* Contribution and Donation are both money in; Expense is money out. */
+const TX_TYPES = ["Contribution", "Donation", "Expense"];
 
 let DATA = null;
 let TAB = "ledger";
@@ -86,6 +92,15 @@ async function boot() {
     if (err instanceof AuthError) toast(err.message, "err");
   }
 
+  /* Restore the session before asking the server who we are.
+     The nf_jwt cookie is short lived, so navigating away and back — for
+     instance to look at the public dashboard — could return to a page whose
+     cookie had lapsed even though the refresh token was still held locally.
+     The server then saw no cookie and reported us signed out, which read as
+     "clicking that link logs me out". Hydrating first swaps the stored refresh
+     token for a fresh cookie, so a live session survives the round trip. */
+  try { await hydrateSession(); } catch { /* genuinely signed out */ }
+
   let me = null;
   try { me = await api("/api/auth/me"); } catch { /* offline */ }
 
@@ -95,6 +110,7 @@ async function boot() {
 
   $("#who").textContent = me.email;
   $("#signout").hidden = false;
+  $("#exports").hidden = false;
   try {
     await refresh();
   } catch (err) {
@@ -135,6 +151,36 @@ function showError(msg) {
   screen(card("Something went wrong", el("p", { class: "muted" }, msg)));
 }
 
+/**
+ * Sign-in with whatever providers the Identity instance actually has enabled.
+ *
+ * Netlify Identity has no built-in second factor. Signing in through a provider
+ * that does — Google, GitHub — is the only way to get 2FA in front of this app
+ * without replacing Identity, so those buttons appear whenever the provider is
+ * switched on in the dashboard, and are silently absent when it is not.
+ */
+async function oauthButtons() {
+  let settings;
+  try { settings = await getSettings(); } catch { return null; }
+
+  const enabled = Object.entries(settings?.external || {})
+    .filter(([name, on]) => on && name !== "email" && name !== "saml")
+    .map(([name]) => name);
+  if (!enabled.length) return null;
+
+  const nice = { google: "Google", github: "GitHub", gitlab: "GitLab", bitbucket: "Bitbucket" };
+  return el("div", { class: "stack" },
+    el("div", { class: "or" }, "or"),
+    ...enabled.map((p) =>
+      el("button", {
+        class: "btn wide", type: "button",
+        onClick: () => { try { oauthLogin(p); } catch (e) { toast(e.message, "err"); } },
+      }, "Continue with " + (nice[p] || p))),
+    el("p", { class: "muted small" },
+      "Signing in through a provider also brings that account's two-step verification with it."),
+  );
+}
+
 function showLogin() {
   const email = el("input", { type: "email", required: true, autocomplete: "username", placeholder: "you@example.com" });
   const pass = el("input", { type: "password", required: true, autocomplete: "current-password", placeholder: "Your password" });
@@ -173,10 +219,15 @@ function showLogin() {
     }, "Forgot your password?"),
   );
 
-  screen(card("Committee sign-in",
+  const cardEl = card("Committee sign-in",
     el("p", { class: "muted" },
       "Editing is limited to invited committee members. The public dashboard stays readable by everyone."),
-    form));
+    form);
+  cardEl.prepend(el("div", { class: "brand brand-stack loginmark", html: brandSvg("full", 74) }));
+  screen(cardEl);
+
+  // Appended once resolved so a slow settings call never delays the password form.
+  oauthButtons().then((node) => { if (node) form.after(node); });
 }
 
 function showInvite(token) {
@@ -221,7 +272,7 @@ function showNewPassword() {
 
 function render() {
   const tabs = [
-    ["ledger", "Income & expenses"],
+    ["ledger", "Contributions & expenses"],
     ["goals", "Goals"],
     ["collections", "Collections"],
     ["plots", "Plots & names"],
@@ -263,7 +314,7 @@ function ledgerTab() {
       el("td", {}, t.date || "—"),
       el("td", {}, t.desc),
       el("td", {}, t.cat),
-      el("td", {}, el("span", { class: "pill " + (t.type === "Income" ? "inc" : "exp") }, t.type)),
+      el("td", {}, el("span", { class: "pill " + pillClass(t.type) }, t.type)),
       el("td", { class: "num" }, money(t.amt)),
       el("td", { class: "muted small" }, t.note || ""),
       el("td", { class: "num nowrap" },
@@ -280,8 +331,9 @@ function ledgerTab() {
   });
 
   return el("div", {},
-    header("Income and expenses",
-      "Everything outside the monthly membership fee. Expenses are entered as positive amounts and stored as negative.",
+    header("Contributions, donations and expenses",
+      "Everything outside the monthly membership fee. Enter every amount as a positive number — " +
+      "choosing Expense records it as money out.",
       el("button", { class: "btn primary", onClick: () => showTxForm(null) }, "Add entry")),
     el("p", { class: "warn" },
       "This ledger is shown on the public dashboard. Do not put household names in a description."),
@@ -295,7 +347,7 @@ function showTxForm(tx) {
   const desc = el("input", { type: "text", required: true, maxlength: "300", value: tx?.desc || "" });
   const cat = el("input", { type: "text", required: true, list: "cats", value: tx?.cat || "" });
   const type = el("select", {},
-    ...["Income", "Expense"].map((v) => el("option", { value: v, selected: tx?.type === v }, v)));
+    ...TX_TYPES.map((v) => el("option", { value: v, selected: tx?.type === v }, v)));
   const amt = el("input", {
     type: "number", step: "0.01", min: "0", required: true,
     value: tx ? Math.abs(tx.amt) : "",
@@ -492,22 +544,33 @@ function plotsTab() {
 }
 
 function showPlotForm(p) {
+  const house = el("input", { type: "text", maxlength: "20", required: true, value: p.house });
   const owner = el("input", { type: "text", maxlength: "200", value: p.owner || "" });
   const status = el("select", {}, ...STATUSES.map((v) =>
     el("option", { value: v, selected: p.status === v }, v)));
   const bf = el("input", { type: "number", step: "0.01", value: p.bf ?? "" });
 
+  const warn = el("p", { class: "warn wide", hidden: true },
+    "Renumbering moves this plot's entire payment history with it.");
+  house.addEventListener("input", () => {
+    warn.hidden = house.value.trim() === p.house;
+  });
+
   modal(`Plot ${p.house}`,
     el("div", { class: "grid2" },
-      el("label", { class: "wide" }, "Household name", owner),
+      el("label", {}, "Plot number", house),
       el("label", {}, "Status", status),
+      warn,
+      el("label", { class: "wide" }, "Household name", owner),
       el("label", {}, "2025 balance brought forward", bf),
       el("p", { class: "muted small wide" },
         "Only plots marked Occupied are counted as owing the monthly fee."),
     ),
     () => mutate(`/api/edit/plots/${encodeURIComponent(p.house)}`, "PUT",
-      { owner: owner.value || null, status: status.value, bf: bf.value || null },
-      "Plot updated."));
+      { house: house.value.trim(), owner: owner.value || null,
+        status: status.value, bf: bf.value || null },
+      house.value.trim() === p.house ? "Plot updated."
+        : `Plot renumbered to ${house.value.trim()}.`));
 }
 
 /* --------------------------------------------------------------- settings */
@@ -621,5 +684,37 @@ $("#signout").addEventListener("click", async () => {
   try { await logout(); } catch { /* already gone */ }
   location.href = "/editor";
 });
+
+/* The Excel export is an authenticated download, so it is fetched with the
+   session rather than opened as a bare link — a plain <a> to a 401 would show
+   the browser's error page instead of a useful message. */
+$("#dl-xlsx").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = "Preparing…";
+  try {
+    const res = await fetch("/api/export/xlsx");
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Export failed.");
+    const blob = await res.blob();
+    const name = (res.headers.get("content-disposition") || "").match(/filename="([^"]+)"/)?.[1]
+      || "prime-aurora-fund.xlsx";
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement("a"), { href: url, download: name });
+    document.body.append(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast("Workbook downloaded.");
+  } catch (err) {
+    toast(err.message, "err");
+  } finally {
+    btn.disabled = false; btn.textContent = original;
+  }
+});
+
+$("#dl-pdf").addEventListener("click", () => window.print());
+
+// Brand mark in the header, and the shared brand colour variables.
+document.head.append(el("style", {}, BRAND_CSS));
+$("#brand").innerHTML = brandSvg("mark", 34);
 
 boot().catch((err) => showError(err.message));

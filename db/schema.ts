@@ -34,9 +34,10 @@ export const collections = pgTable(
   "collections",
   {
     id: serial("id").primaryKey(),
+    // onUpdate cascade lets a plot be renumbered without stranding its history
     houseNo: text("house_no")
       .notNull()
-      .references(() => plots.houseNo, { onDelete: "cascade" }),
+      .references(() => plots.houseNo, { onDelete: "cascade", onUpdate: "cascade" }),
     year: integer("year").notNull(),
     month: integer("month").notNull(), // 1-12
     amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
@@ -56,7 +57,7 @@ export const transactions = pgTable(
     txDate: date("tx_date"),
     description: text("description").notNull(),
     category: text("category").notNull(),
-    // "Income" | "Expense"
+    // "Contribution" | "Donation" | "Expense" — the first two are inflows
     type: text("type").notNull(),
     // expenses are stored negative, matching the source workbook
     amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),

@@ -23,6 +23,9 @@
       --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
     }
   }
+  /* An author `display` rule outranks the UA stylesheet's [hidden]{display:none},
+     so .btn's inline-flex was keeping "Sign out" on screen while signed out. */
+  [hidden] { display: none !important; }
   body { margin:0; background:var(--plane); color:var(--ink);
     font:400 15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; overflow-x:hidden; }
   .wrap { max-width:1180px; margin:0 auto; padding:22px 18px 72px; }
@@ -108,9 +111,26 @@
   .actions { display:flex; justify-content:flex-end; gap:8px; margin-top:20px; }
 
   .pill { display:inline-block; padding:1.5px 8px; border-radius:999px; font-size:11.5px;
-    font-weight:560; border:1px solid var(--border); }
+    font-weight:560; border:1px solid var(--border); white-space:nowrap; }
   .pill.inc { color:var(--good-text); border-color:color-mix(in oklab,var(--good) 45%,transparent); }
+  .pill.don { color:var(--brand-red); border-color:color-mix(in oklab,var(--brand-red) 45%,transparent); }
   .pill.exp { color:var(--critical); border-color:color-mix(in oklab,var(--critical) 45%,transparent); }
+
+  .btn.wide { width:100%; justify-content:center; }
+  .or { position:relative; text-align:center; font-size:12px; color:var(--ink-muted); }
+  .or::before, .or::after { content:""; position:absolute; top:50%; width:calc(50% - 22px);
+    border-top:1px solid var(--grid); }
+  .or::before { left:0; } .or::after { right:0; }
+  .loginmark { justify-content:center; width:100%; margin-bottom:6px; }
+  .card.narrow .brand svg { max-width:210px; height:auto; }
+  header.top .brand { align-items:center; }
+
+  @media print {
+    .idbar, .tabs, .btn, .linkbtn, .toolbar, .toast { display:none !important; }
+    body { background:#fff; color:#000; }
+    .card { box-shadow:none; border-color:#ccc; break-inside:avoid; }
+    a[href]::after { content:""; }
+  }
 
   .muted { color:var(--ink-muted); }
   .small { font-size:12.5px; }
@@ -128,11 +148,20 @@
 <body>
 <div class="wrap">
   <header class="top">
-    <div>
-      <h1>Committee editor</h1>
-      <p class="sub">Prime Aurora Welfare Society &middot; <a href="/">view the public dashboard</a></p>
+    <div class="brand">
+      <span id="brand" aria-hidden="true"></span>
+      <div>
+        <h1>Committee editor</h1>
+        <!-- Opened in a new tab so the editor session is never navigated away from. -->
+        <p class="sub">Prime Aurora Welfare Society &middot;
+          <a href="/" target="_blank" rel="noopener">view the public dashboard&nbsp;↗</a></p>
+      </div>
     </div>
     <div class="idbar">
+      <span id="exports" hidden>
+        <button class="btn small" id="dl-xlsx" title="Full workbook, including household names">↓ Excel</button>
+        <button class="btn small" id="dl-pdf" title="Opens your browser's print dialog — choose Save as PDF">↓ PDF</button>
+      </span>
       <span id="who"></span>
       <button class="btn small" id="signout" hidden>Sign out</button>
     </div>

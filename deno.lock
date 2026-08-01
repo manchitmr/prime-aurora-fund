@@ -16,7 +16,8 @@
         "npm:@netlify/identity@^1.2.0",
         "npm:drizzle-kit@^1.0.0-beta.22",
         "npm:drizzle-orm@^1.0.0-beta.22",
-        "npm:esbuild@~0.28.1"
+        "npm:esbuild@~0.28.1",
+        "npm:exceljs@^4.4.0"
       ]
     }
   }
