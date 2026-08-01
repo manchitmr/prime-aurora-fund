@@ -58,6 +58,11 @@ export function brandSvg(variant = "mark", size = 38) {
     return `<span class="brand-plate"><img src="/logo-mark.png" alt="Prime Aurora"
       style="height:${size}px" width="189" height="172"></span>`;
   }
+  /* The artwork is 289px wide at its native size. Displaying it wider than that
+     upscales a raster and it goes soft, so widths are capped rather than scaled
+     to taste — that softness is what reads as "dull". A vector original would
+     lift this cap. */
+  const w = Math.min(size, 289);
   return `<span class="brand-plate"><img src="/logo.png" alt="Prime Aurora, Mattegoda"
-    style="width:${size * 2.4}px" width="289" height="363"></span>`;
+    style="width:${w}px" width="289" height="363"></span>`;
 }
