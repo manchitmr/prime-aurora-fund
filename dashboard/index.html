@@ -155,9 +155,10 @@
   /* ---------- tables ---------- */
   .tbl-scroll { overflow-x: auto; }
   table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 400px; }
-  th, td { text-align: left; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--grid); }
+  th, td { text-align: left; padding: 8px 18px 8px 0; border-bottom: 1px solid var(--grid); }
   th { font-size: 11.5px; font-weight: 620; letter-spacing: .03em; text-transform: uppercase; color: var(--ink-muted); border-bottom-color: var(--axis); white-space: nowrap; }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; padding-right: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  th:last-child, td:last-child { padding-right: 0; }
   tbody tr:last-child td { border-bottom: none; }
   tbody tr:hover td { background: color-mix(in oklab, var(--series-1) 6%, transparent); }
   tr.total td { font-weight: 620; border-top: 1px solid var(--axis); border-bottom: none; }
@@ -180,8 +181,12 @@
   p.cnote { margin: 10px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--ink-muted); }
 
   .brand { display: inline-flex; align-items: center; gap: 12px; }
-  .brand svg { display: block; height: auto; }
-  .pill.don { color: var(--brand-red); border-color: color-mix(in oklab, var(--brand-red) 45%, transparent); }
+  .brand img { display: block; height: auto; width: auto; }
+  /* Both Contribution and Donation are money IN, so neither may read as a
+     negative. Donation was crimson, which sat next to Expense's red and looked
+     like money going out. Green for donation, blue for member contribution. */
+  .pill.don { color: var(--good-text); border-color: color-mix(in oklab, var(--good) 50%, transparent); }
+  .pill.inc { color: var(--series-1); border-color: color-mix(in oklab, var(--series-1) 50%, transparent); }
 
   @media print {
     .head-actions, #tip, details.tv { display: none !important; }
@@ -320,7 +325,7 @@
 
   <section class="card">
     <h2>Planned projects</h2>
-    <p class="note">Carried over from the goals sheet of the source workbook.</p>
+    <p class="note">Goals the committee is saving towards. The last column compares each cost with the fund balance today, and with the average monthly surplus if it is not yet affordable.</p>
     <div class="tbl-scroll" id="t-proj"></div>
   </section>
 
@@ -839,24 +844,26 @@
   /* Affordability: covered by the fund today, else how many months of average
      net inflow it would take. Mirrors the workbook's Projects formula. */
   function affordability(cost) {
-    if (cost == null) return "Not yet quoted";
-    if (cost <= D.fundBalance) return "Yes, affordable now";
+    if (cost == null) return "Add a cost to assess";
+    if (cost <= D.fundBalance) return "Yes — covered by the fund today";
     const net = D.avgColl - D.avgExp;
     if (!(net > 0)) return "Not at the current rate";
-    return "About " + Math.ceil((cost - D.fundBalance) / net) + " months away";
+    const months = Math.ceil((cost - D.fundBalance) / net);
+    return "Not yet — about " + months + (months === 1 ? " month away" : " months away");
   }
 
   $("#t-proj").innerHTML =
-    "<table><thead><tr><th>#</th><th>Project</th><th>Priority</th><th>Status</th>" +
-    "<th class='num'>Estimated cost</th><th class='num'>Saved</th><th>Affordable now?</th></tr></thead><tbody>" +
+    "<table><thead><tr><th>Project</th><th>Priority</th><th>Status</th>" +
+    "<th class='num'>Estimated cost (Rs.)</th><th class='num'>Saved so far (Rs.)</th>" +
+    "<th>Can the fund cover it?</th></tr></thead><tbody>" +
     (D.projects.length
-      ? D.projects.map((p, i) =>
-          "<tr><td>" + (i + 1) + "</td><td>" + esc(p.name) + "</td><td>" + esc(p.priority) +
+      ? D.projects.map((p) =>
+          "<tr><td>" + esc(p.name) + "</td><td>" + esc(p.priority) +
           "</td><td>" + esc(p.status) + "</td><td class='num'>" +
           (p.cost == null ? "—" : fmt0(p.cost)) + "</td><td class='num'>" +
           (p.saved == null ? "—" : fmt0(p.saved)) + "</td><td>" +
           affordability(p.cost) + "</td></tr>").join("")
-      : "<tr><td colspan='7' style='color:var(--ink-muted)'>No projects recorded yet.</td></tr>") +
+      : "<tr><td colspan='6' style='color:var(--ink-muted)'>No projects recorded yet.</td></tr>") +
     "</tbody></table>";
 
   /* -------------------------------------------------------- brand & print */
