@@ -32,8 +32,28 @@ const STATUSES = ["Occupied", "Unregistered", "Pending", "Bare Land", "Vacant Ho
 const CATEGORIES = ["Dansal / Events", "Utilities", "Cleaning", "Bank",
   "Bank Interest", "Withholding Tax", "Online Bank Charges",
   "Maintenance", "Security", "Membership", "Other"];
-/* Contribution and Donation are both money in; Expense is money out. */
+/* Contribution and Donation are both money in; Expense is money out.
+   Type carries ONE meaning — the direction of the money — so its three values
+   are all a reader (or the fund arithmetic) ever has to understand. What kind
+   of movement it was belongs in Category, which is free text and costs nothing
+   to extend. */
 const TX_TYPES = ["Contribution", "Donation", "Expense"];
+
+/* Categories whose direction is never in doubt. Picking one preselects the
+   Type so it cannot be left on the wrong sign by accident — the commonest way
+   to get a ledger wrong. It is only a default: the Type dropdown stays free,
+   and touching it stops this from overriding the choice. */
+const CATEGORY_DIRECTION = {
+  "Bank Interest": "Contribution",
+  "Withholding Tax": "Expense",
+  "Online Bank Charges": "Expense",
+  "Dansal / Events": "Donation",
+  "Utilities": "Expense",
+  "Cleaning": "Expense",
+  "Maintenance": "Expense",
+  "Security": "Expense",
+  "Membership": "Contribution",
+};
 
 let DATA = null;
 let TAB = "ledger";
@@ -349,6 +369,24 @@ function showTxForm(tx) {
   const cat = el("input", { type: "text", required: true, list: "cats", value: tx?.cat || "" });
   const type = el("select", {},
     ...TX_TYPES.map((v) => el("option", { value: v, selected: tx?.type === v }, v)));
+  const typeHint = el("p", { class: "muted small", style: "margin:4px 0 0" }, "");
+
+  /* Once the editor picks a Type themselves, stop second-guessing them. */
+  let typeTouched = !!tx;
+  type.addEventListener("change", () => { typeTouched = true; typeHint.textContent = ""; });
+
+  cat.addEventListener("input", () => {
+    const implied = CATEGORY_DIRECTION[cat.value.trim()];
+    // A category we know nothing about must not leave a stale claim on screen
+    // saying the Type was set for a reason that no longer applies.
+    if (!implied) { typeHint.textContent = ""; return; }
+    if (typeTouched) return;
+    type.value = implied;
+    typeHint.textContent =
+      implied === "Expense"
+        ? "Set to Expense — this will subtract from the fund."
+        : "Set to " + implied + " — this will add to the fund.";
+  });
   const amt = el("input", {
     type: "number", step: "0.01", min: "0", required: true,
     value: tx ? Math.abs(tx.amt) : "",
@@ -358,10 +396,13 @@ function showTxForm(tx) {
   modal(isNew ? "Add an entry" : "Edit entry",
     el("div", { class: "grid2" },
       el("label", {}, "Date", date),
-      el("label", {}, "Type", type),
+      el("label", {}, "Type", type, typeHint),
       el("label", { class: "wide" }, "Description", desc),
       el("label", {}, "Category", cat),
       el("label", {}, "Amount (Rs.)", amt),
+      el("p", { class: "muted small wide", style: "margin:0" },
+        "Enter the amount as a positive number. Type decides the direction: an Expense is " +
+        "stored as a negative so the fund balance is a plain sum."),
       el("label", { class: "wide" }, "Note (optional)", note),
       el("datalist", { id: "cats" }, ...CATEGORIES.map((c) => el("option", { value: c }))),
     ),
