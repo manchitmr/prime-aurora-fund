@@ -74,7 +74,8 @@
   header.top { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; justify-content: space-between; margin-bottom: 26px; }
   h1 { margin: 0 0 6px; font-size: clamp(22px, 3.4vw, 30px); font-weight: 640; letter-spacing: -0.02em; line-height: 1.15; }
   .sub { margin: 0; color: var(--ink-2); font-size: 14px; }
-  .head-actions { display: flex; gap: 8px; align-items: center; }
+  /* Four actions no longer fit on a phone in one row, so they wrap. */
+  .head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .btn {
     display: inline-flex; align-items: center; gap: 7px;
     padding: 8px 13px; border-radius: 8px; border: 1px solid var(--border);
@@ -178,6 +179,18 @@
 
   p.cnote { margin: 10px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--ink-muted); }
 
+  .brand { display: inline-flex; align-items: center; gap: 12px; }
+  .brand svg { display: block; height: auto; }
+  .pill.don { color: var(--brand-red); border-color: color-mix(in oklab, var(--brand-red) 45%, transparent); }
+
+  @media print {
+    .head-actions, #tip, details.tv { display: none !important; }
+    body { background: #fff; color: #000; }
+    .card, .kpi { box-shadow: none; border-color: #ccc; break-inside: avoid; }
+    section { break-inside: avoid; }
+    .chart-scroll { overflow: visible !important; }
+  }
+
   footer.foot { margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--grid); font-size: 12.5px; color: var(--ink-muted); }
   footer.foot p { margin: 0 0 6px; }
   footer.foot code { font-size: 12px; background: color-mix(in oklab, var(--ink) 6%, transparent); padding: 1px 5px; border-radius: 4px; }
@@ -200,15 +213,21 @@
 
 <div class="wrap">
   <header class="top">
-    <div>
+    <div class="brand">
+      <span id="brand" aria-hidden="true"></span>
+      <div>
       <h1>Prime Aurora Welfare Society</h1>
       <p class="sub" id="subtitle">Figures in Sri&nbsp;Lankan rupees.<br>
         Plots are identified by number only — no household names appear on this page.</p>
+      </div>
     </div>
     <div class="head-actions">
       <button class="btn" id="themeBtn" type="button" aria-label="Toggle colour theme">
         <span id="themeIcon">◐</span><span>Theme</span>
       </button>
+      <a class="btn" href="/api/export/csv" download><span>↓</span><span>CSV</span></a>
+      <button class="btn" id="dl-pdf" type="button"
+        title="Opens your browser's print dialog — choose Save as PDF"><span>↓</span><span>PDF</span></button>
       <a class="btn" href="/editor"><span>✎</span><span>Committee sign-in</span></a>
     </div>
   </header>
@@ -263,10 +282,10 @@
     </div>
 
     <div class="card">
-      <h2>Other income and expenditure by category</h2>
-      <p class="note">Everything outside the monthly membership fee. Income runs right, expenditure runs left.</p>
+      <h2>Money in and out by category</h2>
+      <p class="note">Everything outside the monthly membership fee. Contributions and donations run right, expenditure runs left.</p>
       <ul class="legend">
-        <li><span class="swatch" style="background:var(--series-1)"></span>Income</li>
+        <li><span class="swatch" style="background:var(--series-1)"></span>Contributions &amp; donations</li>
         <li><span class="swatch" style="background:var(--critical)"></span>Expenditure</li>
       </ul>
       <div class="chart-scroll"><svg class="chart" id="c-cats" role="img" aria-label="Income and expenditure by category"></svg></div>
@@ -294,8 +313,8 @@
   </section>
 
   <section class="card">
-    <h2>Other income and expenditure — full ledger</h2>
-    <p class="note">Dansal contributions, utilities, cleaning and bank movements recorded outside the monthly collection sheet.</p>
+    <h2>Contributions, donations and expenses — full ledger</h2>
+    <p class="note">Everything recorded outside the monthly membership collection: donations, utilities, cleaning and bank movements.</p>
     <div class="tbl-scroll" id="t-tx"></div>
   </section>
 
@@ -314,6 +333,7 @@
   </footer>
 </div>
 
+<script src="/brand.js"></script>
 <script>
 (async function () {
   "use strict";
@@ -810,9 +830,10 @@
     "<th class='num'>Amount (Rs.)</th><th>Note</th></tr></thead><tbody>" +
     D.transactions.map((t) =>
       "<tr><td>" + esc(t.date || "—") + "</td><td>" + esc(t.desc) + "</td><td>" + esc(t.cat) + "</td>" +
-      "<td><span class='pill " + (t.type === "Income" ? "inc" : "exp") + "'>" + esc(t.type) + "</span></td>" +
+      "<td><span class='pill " + (t.type === "Expense" ? "exp" : t.type === "Donation" ? "don" : "inc") +
+      "'>" + esc(t.type) + "</span></td>" +
       "<td class='num'>" + fmt2(t.amt) + "</td><td>" + esc(t.note || "") + "</td></tr>").join("") +
-    "<tr class='total'><td colspan='4'>Net of other income and expenditure</td><td class='num'>" +
+    "<tr class='total'><td colspan='4'>Net of contributions, donations and expenses</td><td class='num'>" +
     fmt2(D.otherIncome + D.expenses) + "</td><td></td></tr></tbody></table>";
 
   /* Affordability: covered by the fund today, else how many months of average
@@ -837,6 +858,11 @@
           affordability(p.cost) + "</td></tr>").join("")
       : "<tr><td colspan='7' style='color:var(--ink-muted)'>No projects recorded yet.</td></tr>") +
     "</tbody></table>";
+
+  /* -------------------------------------------------------- brand & print */
+  document.head.insertAdjacentHTML("beforeend", "<style>" + PABrand.BRAND_CSS + "</style>");
+  $("#brand").innerHTML = PABrand.brandSvg("mark", 38);
+  $("#dl-pdf").addEventListener("click", function () { window.print(); });
 
   /* ---------------------------------------------------------------- theme */
   const btn = $("#themeBtn"), icon = $("#themeIcon");

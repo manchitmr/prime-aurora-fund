@@ -3,7 +3,11 @@ import { and, eq } from "drizzle-orm";
 import { db, schema } from "./_shared/db.ts";
 import { requireEditor, json, type Editor } from "./_shared/auth.ts";
 
-const TYPES = new Set(["Income", "Expense"]);
+/* Contribution and Donation are both inflows; only the label and the reporting
+   split differ. "Income" is still accepted so an older client or a bookmarked
+   request cannot start failing mid-session — it is normalised on the way in. */
+const TYPES = new Set(["Contribution", "Donation", "Expense"]);
+const TYPE_ALIASES: Record<string, string> = { Income: "Contribution" };
 const STATUSES = new Set(["Occupied", "Unregistered", "Pending", "Bare Land", "Vacant House"]);
 
 /**
@@ -99,8 +103,10 @@ export default async (req: Request, context: Context) => {
 
 async function transactions(method: string, id: string | undefined, b: any, editor: Editor) {
   if (method === "POST" || method === "PUT") {
-    const type = str(b.type, "Type")!;
-    if (!TYPES.has(type)) throw new Invalid("Type must be Income or Expense.");
+    const raw = str(b.type, "Type")!;
+    const type = TYPE_ALIASES[raw] ?? raw;
+    if (!TYPES.has(type))
+      throw new Invalid(`Type must be one of: ${[...TYPES].join(", ")}.`);
 
     // Expenses are stored negative so that a plain SUM gives the fund balance,
     // matching the source workbook. Accept either sign from the client.
@@ -250,16 +256,33 @@ async function plot(method: string, houseNo: string | undefined, b: any, editor:
   if (!STATUSES.has(status))
     throw new Invalid(`Status must be one of: ${[...STATUSES].join(", ")}.`);
 
-  const values = {
+  const values: Record<string, unknown> = {
     owner: str(b.owner, "Owner", { max: 200, required: false }),
     status,
-    bf2025: nullableMoney(b.bf, "2025 balance") as any,
+    bf2025: nullableMoney(b.bf, "2025 balance"),
   };
-  const [row] = await db.update(schema.plots).set(values)
+
+  /* Renumbering rewrites the primary key. The foreign key carries ON UPDATE
+     CASCADE, so the plot's collections follow it automatically — but a
+     collision with an existing plot would silently merge two histories, so it
+     is rejected up front rather than left to the database. */
+  const renumberTo = str(b.house, "Plot number", { max: 20, required: false });
+  if (renumberTo && renumberTo !== houseNo) {
+    const [clash] = await db.select().from(schema.plots)
+      .where(eq(schema.plots.houseNo, renumberTo));
+    if (clash)
+      throw new Invalid(
+        `Plot ${renumberTo} already exists. Give it a number that is not in use.`);
+    values.houseNo = renumberTo;
+  }
+
+  const [row] = await db.update(schema.plots).set(values as any)
     .where(eq(schema.plots.houseNo, houseNo)).returning();
   if (!row) return json({ error: `Unknown plot '${houseNo}'.` }, 400);
-  await audit(editor, "update", "plot", houseNo, values);
-  return json({ ok: true, row });
+
+  await audit(editor, "update", "plot", houseNo,
+    values.houseNo ? { ...values, renumberedFrom: houseNo } : values);
+  return json({ ok: true, row, renumbered: values.houseNo ? renumberTo : null });
 }
 
 function nullableMoney(v: unknown, field: string) {
