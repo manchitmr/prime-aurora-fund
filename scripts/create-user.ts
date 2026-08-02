@@ -22,6 +22,10 @@ async function main() {
     console.error("Password must be at least 8 characters.");
     process.exit(1);
   }
+  if (!["admin", "editor"].includes(role)) {
+    console.error(`Role must be "admin" or "editor", got "${role}".`);
+    process.exit(1);
+  }
 
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   const db = drizzle({ client: pool, schema });

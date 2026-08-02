@@ -52,6 +52,8 @@ const CATEGORY_DIRECTION = {
 };
 
 let DATA = null;
+let USERS_DATA = null;
+let IS_ADMIN = false;
 let TAB = "ledger";
 
 /* ------------------------------------------------------------------ toast */
@@ -99,12 +101,16 @@ async function refresh() {
 /* ------------------------------------------------------------------- auth */
 
 async function boot() {
+  const inviteToken = new URLSearchParams(location.search).get("invite");
+  if (inviteToken) return showAcceptInvite(inviteToken);
+
   let me = null;
   try { me = await api("/api/auth/me"); } catch { /* offline */ }
 
   if (!me?.signedIn) return showLogin();
   if (!me.canEdit) return showNoAccess(me.email);
 
+  IS_ADMIN = !!me.canManageUsers;
   $("#who").textContent = me.email;
   $("#signout").hidden = false;
   $("#exports").hidden = false;
@@ -170,6 +176,44 @@ function showLogin() {
   screen(cardEl);
 }
 
+async function showAcceptInvite(token) {
+  let invite;
+  try {
+    invite = await api(`/api/invites/${encodeURIComponent(token)}`);
+  } catch (err) {
+    screen(card("Invitation not available", el("p", { class: "muted" }, err.message)));
+    return;
+  }
+
+  const name = el("input", { type: "text", required: true, autocomplete: "name", maxlength: "200" });
+  const pass = el("input", { type: "password", required: true, minlength: "8", autocomplete: "new-password" });
+  const btn = el("button", { class: "btn primary", type: "submit" }, "Create account");
+
+  const form = el("form", {
+    class: "stack",
+    onSubmit: async (e) => {
+      e.preventDefault();
+      btn.disabled = true; btn.textContent = "Creating…";
+      try {
+        await api("/api/auth/accept-invite", "POST", { token, name: name.value.trim(), password: pass.value });
+        history.replaceState(null, "", "/editor");
+        await boot();
+      } catch (err) {
+        toast(err.message, "err");
+        btn.disabled = false; btn.textContent = "Create account";
+      }
+    },
+  },
+    el("label", {}, "Your name", name),
+    el("label", {}, "Choose a password (at least 8 characters)", pass),
+    btn,
+  );
+
+  screen(card("Join as " + invite.role,
+    el("p", { class: "muted" }, `Invited as ${invite.email}.`),
+    form));
+}
+
 /* ------------------------------------------------------------------ shell */
 
 function render() {
@@ -181,6 +225,7 @@ function render() {
     ["settings", "Settings"],
     ["activity", "Activity"],
   ];
+  if (IS_ADMIN) tabs.push(["users", "Users & invites"]);
 
   screen(
     el("div", { class: "summary" },
@@ -201,6 +246,7 @@ function render() {
       : TAB === "collections" ? collectionsTab()
       : TAB === "plots" ? plotsTab()
       : TAB === "settings" ? settingsTab()
+      : TAB === "users" ? usersTab()
       : activityTab()),
   );
 }
@@ -520,6 +566,123 @@ function settingsTab() {
       "projecting from a stale average."),
     table(["Setting", "Value", "What it does", ""], rows),
   );
+}
+
+/* ------------------------------------------------------------------ users */
+
+function usersTab() {
+  if (!USERS_DATA) {
+    api("/api/admin/users")
+      .then((d) => { USERS_DATA = d; if (TAB === "users") render(); })
+      .catch((err) => toast(err.message, "err"));
+    return el("p", { class: "muted" }, "Loading…");
+  }
+
+  const email = el("input", { type: "email", required: true, placeholder: "you@example.com" });
+  const role = el("select", {}, el("option", { value: "editor" }, "editor"), el("option", { value: "admin" }, "admin"));
+  const inviteBtn = el("button", { class: "btn primary", type: "submit" }, "Create invite link");
+  const inviteForm = el("form", {
+    class: "stack",
+    onSubmit: async (e) => {
+      e.preventDefault();
+      inviteBtn.disabled = true;
+      try {
+        const { inviteUrl } = await api("/api/admin/invites", "POST", { email: email.value.trim(), role: role.value });
+        USERS_DATA = null;
+        toast("Invite created — copy the link below and send it.");
+        email.value = "";
+        render();
+        showInviteLink(inviteUrl);
+      } catch (err) {
+        toast(err.message, "err");
+      } finally {
+        inviteBtn.disabled = false;
+      }
+    },
+  },
+    el("label", {}, "Email", email),
+    el("label", {}, "Role", role),
+    inviteBtn,
+  );
+
+  const inviteRows = USERS_DATA.invites.map((i) =>
+    el("tr", {},
+      el("td", {}, i.email),
+      el("td", {}, i.role),
+      el("td", { class: "muted small" }, i.expired ? "Expired" : "Expires " + new Date(i.expiresAt).toLocaleDateString()),
+      el("td", { class: "num" },
+        el("button", {
+          class: "linkbtn danger",
+          onClick: () => confirmDelete(`Revoke the invite for ${i.email}?`, async () => {
+            await api(`/api/admin/invites/${i.id}`, "DELETE");
+            USERS_DATA = null;
+            render();
+          }),
+        }, "Revoke"))));
+
+  const userRows = USERS_DATA.users.map((u) => {
+    const roleSelect = el("select", {},
+      el("option", { value: "editor", selected: u.role === "editor" }, "editor"),
+      el("option", { value: "admin", selected: u.role === "admin" }, "admin"));
+    return el("tr", {},
+      el("td", {}, u.email),
+      el("td", {}, u.name || "—"),
+      el("td", {}, roleSelect),
+      el("td", { class: "num nowrap" },
+        el("button", {
+          class: "btn small",
+          onClick: async () => {
+            try {
+              await api(`/api/admin/users/${u.id}`, "PUT", { role: roleSelect.value });
+              toast("Role updated.");
+              USERS_DATA = null;
+              render();
+            } catch (err) { toast(err.message, "err"); }
+          },
+        }, "Save role"),
+        " ",
+        el("button", {
+          class: "linkbtn danger",
+          onClick: () => confirmDelete(`Remove ${u.email}'s account?`, async () => {
+            try {
+              await api(`/api/admin/users/${u.id}`, "DELETE");
+              USERS_DATA = null;
+              render();
+            } catch (err) { toast(err.message, "err"); }
+          }),
+        }, "Remove")));
+  });
+
+  return el("div", {},
+    header("Invite someone", "Creates a one-time link — you send it however you like. Expires in 7 days."),
+    inviteForm,
+    el("h3", { style: "margin-top:28px" }, "Pending invites"),
+    table(["Email", "Role", "Status", ""], inviteRows),
+    el("h3", { style: "margin-top:28px" }, "Accounts"),
+    table(["Email", "Name", "Role", ""], userRows),
+  );
+}
+
+function showInviteLink(url) {
+  const input = el("input", { type: "text", readonly: true, value: url, onClick: (e) => e.target.select() });
+  const back = el("div", { class: "backdrop" });
+  const close = () => back.remove();
+  back.append(el("div", { class: "modal" },
+    el("h3", {}, "Invite link"),
+    el("p", { class: "muted" }, "Copy this and send it to them. It works once."),
+    el("label", {}, "Link", input),
+    el("div", { class: "actions" },
+      el("button", { class: "btn", onClick: close }, "Close"),
+      el("button", {
+        class: "btn primary", type: "button",
+        onClick: async () => {
+          try { await navigator.clipboard.writeText(url); toast("Copied."); }
+          catch { input.select(); }
+        },
+      }, "Copy"))));
+  back.addEventListener("mousedown", (e) => { if (e.target === back) close(); });
+  document.body.append(back);
+  input.select();
 }
 
 /* --------------------------------------------------------------- activity */

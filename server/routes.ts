@@ -1,9 +1,16 @@
+import { randomBytes } from "node:crypto";
 import { Router } from "express";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import ExcelJS from "exceljs";
 import { db, schema } from "./db.ts";
 import { loadAll, buildPublic, buildPrivate } from "./shape.ts";
-import { currentUser, requireEditor, verifyPassword, issueSession, clearSession, type Editor } from "./auth.ts";
+import {
+  currentUser, requireEditor, requireAdmin,
+  verifyPassword, hashPassword, issueSession, clearSession, type Editor,
+} from "./auth.ts";
+
+const ROLES = new Set(["admin", "editor"]);
+const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const router = Router();
 
@@ -31,14 +38,153 @@ router.post("/api/auth/logout", (_req, res) => {
 router.get("/api/auth/me", (req, res) => {
   res.set("cache-control", "no-store");
   const user = currentUser(req);
-  if (!user) return res.json({ signedIn: false, canEdit: false });
+  if (!user) return res.json({ signedIn: false, canEdit: false, canManageUsers: false });
   res.json({
     signedIn: true,
-    canEdit: user.role === "editor",
+    canEdit: user.role === "editor" || user.role === "admin",
+    canManageUsers: user.role === "admin",
     email: user.email,
     name: user.name,
+    role: user.role,
     roles: [user.role],
   });
+});
+
+/** Preview an invite before accepting it — email/role/validity only, no auth. */
+router.get("/api/invites/:token", async (req, res) => {
+  const [invite] = await db.select().from(schema.invitations).where(eq(schema.invitations.token, req.params.token));
+  if (!invite) return res.status(404).json({ error: "That invitation link is not valid." });
+  if (invite.acceptedAt) return res.status(409).json({ error: "That invitation has already been used." });
+  if (invite.expiresAt.getTime() < Date.now())
+    return res.status(409).json({ error: "That invitation has expired. Ask an admin to send a new one." });
+  res.json({ email: invite.email, role: invite.role });
+});
+
+/**
+ * Accept an invitation: no session required, the token itself is the
+ * authorisation. One-time — accepting clears the token's usability by
+ * stamping acceptedAt, so a link that leaked after use is inert.
+ */
+router.post("/api/auth/accept-invite", async (req, res) => {
+  const token = String(req.body?.token ?? "");
+  const password = String(req.body?.password ?? "");
+  const name = req.body?.name ? String(req.body.name).trim().slice(0, 200) : null;
+  if (!token) return res.status(400).json({ error: "Missing invite token." });
+  if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters." });
+
+  const [invite] = await db.select().from(schema.invitations).where(eq(schema.invitations.token, token));
+  if (!invite) return res.status(404).json({ error: "That invitation link is not valid." });
+  if (invite.acceptedAt) return res.status(409).json({ error: "That invitation has already been used." });
+  if (invite.expiresAt.getTime() < Date.now())
+    return res.status(409).json({ error: "That invitation has expired. Ask an admin to send a new one." });
+
+  const [existing] = await db.select().from(schema.users).where(eq(schema.users.email, invite.email));
+  if (existing) return res.status(409).json({ error: "An account already exists for that email." });
+
+  const passwordHash = await hashPassword(password);
+  const [user] = await db.insert(schema.users)
+    .values({ email: invite.email, passwordHash, name, role: invite.role })
+    .returning();
+  await db.update(schema.invitations).set({ acceptedAt: new Date() }).where(eq(schema.invitations.id, invite.id));
+
+  issueSession(res, { id: user.id, email: user.email, name: user.name, role: user.role });
+  res.json({ ok: true });
+});
+
+/* -------------------------------------------------------------- users & invites */
+
+router.get("/api/admin/users", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const users = await db.select({
+    id: schema.users.id, email: schema.users.email, name: schema.users.name,
+    role: schema.users.role, createdAt: schema.users.createdAt,
+  }).from(schema.users).orderBy(schema.users.email);
+
+  const invites = await db.select().from(schema.invitations)
+    .where(isNull(schema.invitations.acceptedAt))
+    .orderBy(desc(schema.invitations.createdAt));
+
+  res.set("cache-control", "no-store");
+  res.json({
+    users,
+    invites: invites.map((i) => ({
+      id: i.id, email: i.email, role: i.role,
+      expiresAt: i.expiresAt, expired: i.expiresAt.getTime() < Date.now(),
+      createdAt: i.createdAt,
+    })),
+  });
+});
+
+router.delete("/api/admin/users/:id", async (req, res) => {
+  const admin = requireAdmin(req, res);
+  if (!admin) return;
+
+  const id = Number(req.params.id);
+  if (id === admin.id) return res.status(400).json({ error: "You cannot remove your own account." });
+
+  const [row] = await db.delete(schema.users).where(eq(schema.users.id, id)).returning();
+  if (!row) return res.status(409).json({ error: "That user no longer exists." });
+  await db.insert(schema.auditLog).values({
+    userEmail: admin.email, action: "delete", entity: "user", entityId: String(id), detail: { email: row.email },
+  });
+  res.json({ ok: true });
+});
+
+router.put("/api/admin/users/:id", async (req, res) => {
+  const admin = requireAdmin(req, res);
+  if (!admin) return;
+
+  const id = Number(req.params.id);
+  const role = String(req.body?.role ?? "");
+  if (!ROLES.has(role)) return res.status(400).json({ error: `Role must be one of: ${[...ROLES].join(", ")}.` });
+  if (id === admin.id && role !== "admin")
+    return res.status(400).json({ error: "You cannot remove your own admin access." });
+
+  const [row] = await db.update(schema.users).set({ role }).where(eq(schema.users.id, id)).returning();
+  if (!row) return res.status(409).json({ error: "That user no longer exists." });
+  await db.insert(schema.auditLog).values({
+    userEmail: admin.email, action: "update", entity: "user", entityId: String(id), detail: { role },
+  });
+  res.json({ ok: true, row: { id: row.id, email: row.email, name: row.name, role: row.role } });
+});
+
+router.post("/api/admin/invites", async (req, res) => {
+  const admin = requireAdmin(req, res);
+  if (!admin) return;
+
+  const email = String(req.body?.email ?? "").trim().toLowerCase();
+  const role = String(req.body?.role ?? "editor");
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    return res.status(400).json({ error: "Enter a valid email address." });
+  if (!ROLES.has(role)) return res.status(400).json({ error: `Role must be one of: ${[...ROLES].join(", ")}.` });
+
+  const [existingUser] = await db.select().from(schema.users).where(eq(schema.users.email, email));
+  if (existingUser) return res.status(409).json({ error: "An account already exists for that email." });
+
+  // Superseded by this one — an old link for the same address should stop working.
+  await db.delete(schema.invitations)
+    .where(and(eq(schema.invitations.email, email), isNull(schema.invitations.acceptedAt)));
+
+  const token = randomBytes(24).toString("base64url");
+  const [invite] = await db.insert(schema.invitations).values({
+    email, role, token, invitedBy: admin.id, expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+  }).returning();
+
+  await db.insert(schema.auditLog).values({
+    userEmail: admin.email, action: "create", entity: "invitation", entityId: String(invite.id), detail: { email, role },
+  });
+
+  const origin = `${req.protocol}://${req.get("host")}`;
+  res.status(201).json({ ok: true, inviteUrl: `${origin}/editor?invite=${token}`, expiresAt: invite.expiresAt });
+});
+
+router.delete("/api/admin/invites/:id", async (req, res) => {
+  const admin = requireAdmin(req, res);
+  if (!admin) return;
+
+  const [row] = await db.delete(schema.invitations).where(eq(schema.invitations.id, Number(req.params.id))).returning();
+  if (!row) return res.status(409).json({ error: "That invitation no longer exists." });
+  res.json({ ok: true });
 });
 
 /* -------------------------------------------------------------------- data */

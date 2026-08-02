@@ -92,9 +92,10 @@ export const settings = pgTable("settings", {
 });
 
 /**
- * Editor accounts. `role` is what actually grants write access — a row
- * existing here only proves the person can log in, matching how
- * requireEditor() in server/auth.ts checks role, not just session validity.
+ * Editor accounts. `role` is what actually grants access — a row existing
+ * here only proves the person can log in, matching how requireEditor() and
+ * requireAdmin() in server/auth.ts check role, not just session validity.
+ * "admin" is a superset of "editor": it can additionally manage users/invites.
  */
 export const users = pgTable(
   "users",
@@ -103,10 +104,30 @@ export const users = pgTable(
     email: text("email").notNull(),
     passwordHash: text("password_hash").notNull(),
     name: text("name"),
-    role: text("role").notNull().default("editor"), // "editor" | "viewer"
+    role: text("role").notNull().default("editor"), // "admin" | "editor"
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [uniqueIndex("users_email_idx").on(t.email)],
+);
+
+/**
+ * Pending account invitations. `token` is the whole access control — knowing
+ * it is what lets `/editor?invite=...` create the account, so it is looked up
+ * directly rather than joined on anything guessable like email.
+ */
+export const invitations = pgTable(
+  "invitations",
+  {
+    id: serial("id").primaryKey(),
+    email: text("email").notNull(),
+    role: text("role").notNull().default("editor"), // "admin" | "editor"
+    token: text("token").notNull(),
+    invitedBy: integer("invited_by").references(() => users.id, { onDelete: "set null" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("invitations_token_idx").on(t.token)],
 );
 
 /** Who changed what. Meaningful because logins are per-person and invite-only. */
