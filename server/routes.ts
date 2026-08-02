@@ -11,6 +11,7 @@ import {
 
 const ROLES = new Set(["admin", "editor"]);
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const RESET_TTL_MS = 24 * 60 * 60 * 1000;
 
 export const router = Router();
 
@@ -86,6 +87,43 @@ router.post("/api/auth/accept-invite", async (req, res) => {
     .values({ email: invite.email, passwordHash, name, role: invite.role })
     .returning();
   await db.update(schema.invitations).set({ acceptedAt: new Date() }).where(eq(schema.invitations.id, invite.id));
+
+  issueSession(res, { id: user.id, email: user.email, name: user.name, role: user.role });
+  res.json({ ok: true });
+});
+
+/** Preview a password reset link before completing it — email only, no auth. */
+router.get("/api/password-resets/:token", async (req, res) => {
+  const [reset] = await db.select().from(schema.passwordResets).where(eq(schema.passwordResets.token, req.params.token));
+  if (!reset) return res.status(404).json({ error: "That reset link is not valid." });
+  if (reset.usedAt) return res.status(409).json({ error: "That reset link has already been used." });
+  if (reset.expiresAt.getTime() < Date.now())
+    return res.status(409).json({ error: "That reset link has expired. Ask an admin to send a new one." });
+
+  const [user] = await db.select().from(schema.users).where(eq(schema.users.id, reset.userId));
+  if (!user) return res.status(409).json({ error: "That account no longer exists." });
+  res.json({ email: user.email });
+});
+
+/** Complete a password reset: no session required, the token is the authorisation. */
+router.post("/api/auth/reset-password", async (req, res) => {
+  const token = String(req.body?.token ?? "");
+  const password = String(req.body?.password ?? "");
+  if (!token) return res.status(400).json({ error: "Missing reset token." });
+  if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters." });
+
+  const [reset] = await db.select().from(schema.passwordResets).where(eq(schema.passwordResets.token, token));
+  if (!reset) return res.status(404).json({ error: "That reset link is not valid." });
+  if (reset.usedAt) return res.status(409).json({ error: "That reset link has already been used." });
+  if (reset.expiresAt.getTime() < Date.now())
+    return res.status(409).json({ error: "That reset link has expired. Ask an admin to send a new one." });
+
+  const [user] = await db.select().from(schema.users).where(eq(schema.users.id, reset.userId));
+  if (!user) return res.status(409).json({ error: "That account no longer exists." });
+
+  const passwordHash = await hashPassword(password);
+  await db.update(schema.users).set({ passwordHash }).where(eq(schema.users.id, user.id));
+  await db.update(schema.passwordResets).set({ usedAt: new Date() }).where(eq(schema.passwordResets.id, reset.id));
 
   issueSession(res, { id: user.id, email: user.email, name: user.name, role: user.role });
   res.json({ ok: true });
@@ -185,6 +223,32 @@ router.delete("/api/admin/invites/:id", async (req, res) => {
   const [row] = await db.delete(schema.invitations).where(eq(schema.invitations.id, Number(req.params.id))).returning();
   if (!row) return res.status(409).json({ error: "That invitation no longer exists." });
   res.json({ ok: true });
+});
+
+/** Admin generates a one-time password reset link for an existing account. */
+router.post("/api/admin/users/:id/reset-password", async (req, res) => {
+  const admin = requireAdmin(req, res);
+  if (!admin) return;
+
+  const userId = Number(req.params.id);
+  const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
+  if (!user) return res.status(409).json({ error: "That user no longer exists." });
+
+  // Superseded by this one — an old link for the same account should stop working.
+  await db.delete(schema.passwordResets)
+    .where(and(eq(schema.passwordResets.userId, userId), isNull(schema.passwordResets.usedAt)));
+
+  const token = randomBytes(24).toString("base64url");
+  const [reset] = await db.insert(schema.passwordResets).values({
+    userId, token, expiresAt: new Date(Date.now() + RESET_TTL_MS),
+  }).returning();
+
+  await db.insert(schema.auditLog).values({
+    userEmail: admin.email, action: "create", entity: "password_reset", entityId: String(user.id), detail: { email: user.email },
+  });
+
+  const origin = `${req.protocol}://${req.get("host")}`;
+  res.status(201).json({ ok: true, resetUrl: `${origin}/editor?reset=${token}`, expiresAt: reset.expiresAt });
 });
 
 /* -------------------------------------------------------------------- data */

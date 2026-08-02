@@ -130,6 +130,25 @@ export const invitations = pgTable(
   (t) => [uniqueIndex("invitations_token_idx").on(t.token)],
 );
 
+/**
+ * Admin-issued password reset links. Same shape as invitations but scoped to
+ * an existing user rather than an email — the account and its role are
+ * unchanged, only the password. Shorter-lived than an invite since it grants
+ * access to data that already exists, not just a fresh account.
+ */
+export const passwordResets = pgTable(
+  "password_resets",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    token: text("token").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("password_resets_token_idx").on(t.token)],
+);
+
 /** Who changed what. Meaningful because logins are per-person and invite-only. */
 export const auditLog = pgTable(
   "audit_log",

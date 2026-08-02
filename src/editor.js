@@ -101,8 +101,11 @@ async function refresh() {
 /* ------------------------------------------------------------------- auth */
 
 async function boot() {
-  const inviteToken = new URLSearchParams(location.search).get("invite");
+  const params = new URLSearchParams(location.search);
+  const inviteToken = params.get("invite");
   if (inviteToken) return showAcceptInvite(inviteToken);
+  const resetToken = params.get("reset");
+  if (resetToken) return showResetPassword(resetToken);
 
   let me = null;
   try { me = await api("/api/auth/me"); } catch { /* offline */ }
@@ -211,6 +214,42 @@ async function showAcceptInvite(token) {
 
   screen(card("Join as " + invite.role,
     el("p", { class: "muted" }, `Invited as ${invite.email}.`),
+    form));
+}
+
+async function showResetPassword(token) {
+  let reset;
+  try {
+    reset = await api(`/api/password-resets/${encodeURIComponent(token)}`);
+  } catch (err) {
+    screen(card("Reset link not available", el("p", { class: "muted" }, err.message)));
+    return;
+  }
+
+  const pass = el("input", { type: "password", required: true, minlength: "8", autocomplete: "new-password" });
+  const btn = el("button", { class: "btn primary", type: "submit" }, "Set password");
+
+  const form = el("form", {
+    class: "stack",
+    onSubmit: async (e) => {
+      e.preventDefault();
+      btn.disabled = true; btn.textContent = "Saving…";
+      try {
+        await api("/api/auth/reset-password", "POST", { token, password: pass.value });
+        history.replaceState(null, "", "/editor");
+        await boot();
+      } catch (err) {
+        toast(err.message, "err");
+        btn.disabled = false; btn.textContent = "Set password";
+      }
+    },
+  },
+    el("label", {}, "New password (at least 8 characters)", pass),
+    btn,
+  );
+
+  screen(card("Set a new password",
+    el("p", { class: "muted" }, `For ${reset.email}.`),
     form));
 }
 
@@ -592,7 +631,7 @@ function usersTab() {
         toast("Invite created — copy the link below and send it.");
         email.value = "";
         render();
-        showInviteLink(inviteUrl);
+        showLinkModal("Invite link", "Copy this and send it to them. It works once.", inviteUrl);
       } catch (err) {
         toast(err.message, "err");
       } finally {
@@ -642,6 +681,17 @@ function usersTab() {
         }, "Save role"),
         " ",
         el("button", {
+          class: "btn small",
+          onClick: async () => {
+            try {
+              const { resetUrl } = await api(`/api/admin/users/${u.id}/reset-password`, "POST");
+              showLinkModal("Password reset link",
+                `Copy this and send it to ${u.email}. It works once and expires in 24 hours.`, resetUrl);
+            } catch (err) { toast(err.message, "err"); }
+          },
+        }, "Reset password"),
+        " ",
+        el("button", {
           class: "linkbtn danger",
           onClick: () => confirmDelete(`Remove ${u.email}'s account?`, async () => {
             try {
@@ -663,13 +713,13 @@ function usersTab() {
   );
 }
 
-function showInviteLink(url) {
+function showLinkModal(title, hint, url) {
   const input = el("input", { type: "text", readonly: true, value: url, onClick: (e) => e.target.select() });
   const back = el("div", { class: "backdrop" });
   const close = () => back.remove();
   back.append(el("div", { class: "modal" },
-    el("h3", {}, "Invite link"),
-    el("p", { class: "muted" }, "Copy this and send it to them. It works once."),
+    el("h3", {}, title),
+    el("p", { class: "muted" }, hint),
     el("label", {}, "Link", input),
     el("div", { class: "actions" },
       el("button", { class: "btn", onClick: close }, "Close"),
