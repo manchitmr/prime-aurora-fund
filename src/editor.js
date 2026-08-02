@@ -1,7 +1,3 @@
-import {
-  login, logout, handleAuthCallback, acceptInvite, hydrateSession,
-  requestPasswordRecovery, updateUser, oauthLogin, getSettings, AuthError,
-} from "@netlify/identity";
 import { BRAND_CSS, brandSvg } from "./brand.js";
 
 /* ------------------------------------------------------------------ utils */
@@ -103,29 +99,9 @@ async function refresh() {
 /* ------------------------------------------------------------------- auth */
 
 async function boot() {
-  // Must run before anything else: invite, recovery and confirmation links all
-  // arrive as a URL hash on this page.
-  try {
-    const result = await handleAuthCallback();
-    if (result?.type === "invite") return showInvite(result.token);
-    if (result?.type === "recovery") return showNewPassword();
-  } catch (err) {
-    if (err instanceof AuthError) toast(err.message, "err");
-  }
-
-  /* Restore the session before asking the server who we are.
-     The nf_jwt cookie is short lived, so navigating away and back — for
-     instance to look at the public dashboard — could return to a page whose
-     cookie had lapsed even though the refresh token was still held locally.
-     The server then saw no cookie and reported us signed out, which read as
-     "clicking that link logs me out". Hydrating first swaps the stored refresh
-     token for a fresh cookie, so a live session survives the round trip. */
-  try { await hydrateSession(); } catch { /* genuinely signed out */ }
-
   let me = null;
   try { me = await api("/api/auth/me"); } catch { /* offline */ }
 
-  if (me?.identityUnavailable) return showSetupNeeded();
   if (!me?.signedIn) return showLogin();
   if (!me.canEdit) return showNoAccess(me.email);
 
@@ -148,58 +124,18 @@ function card(title, ...kids) {
   return el("div", { class: "card narrow" }, el("h2", {}, title), ...kids);
 }
 
-function showSetupNeeded() {
-  screen(card("Identity is not enabled yet",
-    el("p", { class: "muted" },
-      "This site's Netlify Identity instance has not been turned on, so nobody can sign in yet. " +
-      "A site owner needs to enable it in the Netlify dashboard under Project configuration → Identity, " +
-      "then invite the committee members."),
-  ));
-}
-
 function showNoAccess(email) {
   $("#who").textContent = email;
   $("#signout").hidden = false;
   screen(card("No edit access",
     el("p", { class: "muted" },
       `You are signed in as ${email}, but your account does not have the "editor" role, ` +
-      "so you cannot change any figures. Ask a site owner to grant it in the Netlify dashboard " +
-      "under Identity → your user → Edit roles."),
+      "so you cannot change any figures. Ask a site owner to grant it directly in the database."),
   ));
 }
 
 function showError(msg) {
   screen(card("Something went wrong", el("p", { class: "muted" }, msg)));
-}
-
-/**
- * Sign-in with whatever providers the Identity instance actually has enabled.
- *
- * Netlify Identity has no built-in second factor. Signing in through a provider
- * that does — Google, GitHub — is the only way to get 2FA in front of this app
- * without replacing Identity, so those buttons appear whenever the provider is
- * switched on in the dashboard, and are silently absent when it is not.
- */
-async function oauthButtons() {
-  let settings;
-  try { settings = await getSettings(); } catch { return null; }
-
-  const enabled = Object.entries(settings?.external || {})
-    .filter(([name, on]) => on && name !== "email" && name !== "saml")
-    .map(([name]) => name);
-  if (!enabled.length) return null;
-
-  const nice = { google: "Google", github: "GitHub", gitlab: "GitLab", bitbucket: "Bitbucket" };
-  return el("div", { class: "stack" },
-    el("div", { class: "or" }, "or"),
-    ...enabled.map((p) =>
-      el("button", {
-        class: "btn wide", type: "button",
-        onClick: () => { try { oauthLogin(p); } catch (e) { toast(e.message, "err"); } },
-      }, "Continue with " + (nice[p] || p))),
-    el("p", { class: "muted small" },
-      "Signing in through a provider also brings that account's two-step verification with it."),
-  );
 }
 
 function showLogin() {
@@ -213,13 +149,10 @@ function showLogin() {
       e.preventDefault();
       btn.disabled = true; btn.textContent = "Signing in…";
       try {
-        await login(email.value.trim(), pass.value);
-        location.hash = "";
+        await api("/api/auth/login", "POST", { email: email.value.trim(), password: pass.value });
         await boot();
       } catch (err) {
-        toast(err instanceof AuthError && err.status === 400
-          ? "That email and password combination was not recognised."
-          : err.message, "err");
+        toast(err.message, "err");
         btn.disabled = false; btn.textContent = "Sign in";
       }
     },
@@ -227,66 +160,14 @@ function showLogin() {
     el("label", {}, "Email", email),
     el("label", {}, "Password", pass),
     btn,
-    el("button", {
-      class: "linkbtn", type: "button",
-      onClick: async () => {
-        const addr = email.value.trim();
-        if (!addr) return toast("Enter your email address first.", "err");
-        try {
-          await requestPasswordRecovery(addr);
-          toast("If that address has an account, a reset link is on its way.");
-        } catch (err) { toast(err.message, "err"); }
-      },
-    }, "Forgot your password?"),
   );
 
   const cardEl = card("Committee sign-in",
     el("p", { class: "muted" },
-      "Editing is limited to invited committee members. The public dashboard stays readable by everyone."),
+      "Editing is limited to committee members with an account. The public dashboard stays readable by everyone."),
     form);
   cardEl.prepend(el("div", { class: "brand brand-stack loginmark", html: brandSvg("full", 74) }));
   screen(cardEl);
-
-  // Appended once resolved so a slow settings call never delays the password form.
-  oauthButtons().then((node) => { if (node) form.after(node); });
-}
-
-function showInvite(token) {
-  const pass = el("input", { type: "password", required: true, minlength: "8", autocomplete: "new-password" });
-  const form = el("form", {
-    class: "stack",
-    onSubmit: async (e) => {
-      e.preventDefault();
-      try {
-        await acceptInvite(token, pass.value);
-        toast("Welcome. Your account is ready.");
-        location.hash = "";
-        await boot();
-      } catch (err) { toast(err.message, "err"); }
-    },
-  }, el("label", {}, "Choose a password (at least 8 characters)", pass),
-     el("button", { class: "btn primary", type: "submit" }, "Accept invitation"));
-
-  screen(card("Accept your invitation", form));
-}
-
-function showNewPassword() {
-  const pass = el("input", { type: "password", required: true, minlength: "8", autocomplete: "new-password" });
-  const form = el("form", {
-    class: "stack",
-    onSubmit: async (e) => {
-      e.preventDefault();
-      try {
-        await updateUser({ password: pass.value });
-        toast("Password updated.");
-        location.hash = "";
-        await boot();
-      } catch (err) { toast(err.message, "err"); }
-    },
-  }, el("label", {}, "New password (at least 8 characters)", pass),
-     el("button", { class: "btn primary", type: "submit" }, "Set password"));
-
-  screen(card("Set a new password", form));
 }
 
 /* ------------------------------------------------------------------ shell */
@@ -723,7 +604,7 @@ function confirmDelete(message, run) {
 /* ------------------------------------------------------------------- init */
 
 $("#signout").addEventListener("click", async () => {
-  try { await logout(); } catch { /* already gone */ }
+  try { await api("/api/auth/logout", "POST"); } catch { /* already gone */ }
   location.href = "/editor";
 });
 

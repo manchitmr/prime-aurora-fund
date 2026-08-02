@@ -13,7 +13,7 @@ import {
 
 /**
  * A plot in the scheme. `owner` is personal data and must never reach an
- * unauthenticated response — see netlify/functions/_shared/shape.ts.
+ * unauthenticated response — see server/shape.ts.
  * `status` drives the fee obligation: only "Occupied" plots owe the monthly fee.
  */
 export const plots = pgTable(
@@ -90,6 +90,24 @@ export const settings = pgTable("settings", {
   value: text("value").notNull(),
   note: text("note"),
 });
+
+/**
+ * Editor accounts. `role` is what actually grants write access — a row
+ * existing here only proves the person can log in, matching how
+ * requireEditor() in server/auth.ts checks role, not just session validity.
+ */
+export const users = pgTable(
+  "users",
+  {
+    id: serial("id").primaryKey(),
+    email: text("email").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    name: text("name"),
+    role: text("role").notNull().default("editor"), // "editor" | "viewer"
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("users_email_idx").on(t.email)],
+);
 
 /** Who changed what. Meaningful because logins are per-person and invite-only. */
 export const auditLog = pgTable(

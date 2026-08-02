@@ -206,18 +206,6 @@
 </style>
 </head>
 <body>
-<script>
-/* Netlify Identity mails invite, recovery and confirmation links pointing at the
-   site root, but the code that consumes those tokens lives on /editor. Forward
-   them there, hash intact, before anything else runs — otherwise the link looks
-   broken: the dashboard loads and silently ignores the token. */
-(function () {
-  var h = window.location.hash || "";
-  if (/^#(?:.*&)?(invite_token|recovery_token|confirmation_token|email_change_token)=/.test(h)) {
-    window.location.replace("/editor" + h);
-  }
-})();
-</script>
 <div id="tip" role="status" aria-live="polite"></div>
 
 <div class="wrap">
