@@ -13,7 +13,7 @@ editor for the ledger, goals, settings and monthly collections.
 
 ## Privacy model
 
-There are two data shapes, and the split is enforced on the server:
+There are two data shapes, and the server enforces the split:
 
 | Endpoint | Auth | Contains names? |
 |---|---|---|
@@ -22,9 +22,9 @@ There are two data shapes, and the split is enforced on the server:
 | `POST/PUT/DELETE /api/edit/:entity[/:id]` | editor | — |
 
 `buildPublic()` in `netlify/functions/_shared/shape.ts` assembles the public payload
-from plot numbers only. It never reads the `owner` column — this is deliberately not
-a "delete the field before sending" filter, because that pattern leaks the moment a
-new field is added.
+from plot numbers only. It never reads the `owner` column. A "delete the field before sending" filter would
+leak the moment someone adds a new field, so it builds the payload up from the
+allowed columns instead.
 
 Ledger descriptions *are* public. The editor warns against putting household names
 in them; one seeded row had to be generalised for exactly this reason.
@@ -42,8 +42,8 @@ in them; one seeded row had to be generalised for exactly this reason.
 1. **A path-routed Function must never return 404.** The platform treats the route as
    unhandled and falls through to static-file candidates, re-entering the function with
    a mangled path and a misleading error. Use `400` (bad input) or `409` (row vanished).
-2. **Identity and Database settings are dashboard-only.** There is no API. Changing them
-   is always a human step.
+2. **Identity and Database settings are dashboard-only.** There is no API, so changing
+   them is always a human step.
 
 ## Local development
 
@@ -69,7 +69,7 @@ Data-only changes use a hand-written migration:
 netlify database migrations new -d "what it does"
 ```
 
-Once a migration has been applied anywhere, never edit it — roll forward.
+Once a migration has been applied anywhere, never edit it; roll forward.
 
 ## First-time setup checklist
 
@@ -86,6 +86,6 @@ Members open `/editor`, accept the invite and set a password.
 
 ## Keeping the numbers honest
 
-`months_completed` in **Settings** drives every forecast on the dashboard. It must be
-increased at the end of each month or the year-end projection keeps extrapolating from
-a stale average. It is range-checked (0–12) but nothing can tell it is *stale*.
+`months_completed` in **Settings** drives every forecast on the dashboard. Increase it at the end of each month, or the year-end projection keeps extrapolating
+from a stale average. The app range-checks it (0–12), but nothing can tell whether the
+value is stale.

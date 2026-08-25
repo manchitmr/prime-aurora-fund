@@ -1,5 +1,6 @@
 import type { Config, Context } from "@netlify/functions";
-import { and, eq } from "drizzle-orm";
+// aliased: the `str` helper below already takes a `max` parameter
+import { and, eq, max as maxOf } from "drizzle-orm";
 import { db, schema } from "./_shared/db.ts";
 import { requireEditor, json, type Editor } from "./_shared/auth.ts";
 
@@ -249,6 +250,8 @@ async function collection(method: string, b: any, editor: Editor) {
 }
 
 async function plot(method: string, houseNo: string | undefined, b: any, editor: Editor) {
+  if (method === "POST") return await createPlot(b, editor);
+  if (method === "DELETE") return await deletePlot(houseNo, editor);
   if (method !== "PUT") return json({ error: "Method not allowed." }, 405);
   if (!houseNo) throw new Invalid("Missing plot number.");
 
@@ -283,6 +286,72 @@ async function plot(method: string, houseNo: string | undefined, b: any, editor:
   await audit(editor, "update", "plot", houseNo,
     values.houseNo ? { ...values, renumberedFrom: houseNo } : values);
   return json({ ok: true, row, renumbered: values.houseNo ? renumberTo : null });
+}
+
+/** Add a plot to the register. */
+async function createPlot(b: any, editor: Editor) {
+  const houseNo = str(b.house, "Plot number", { max: 20 })!;
+  const status = str(b.status, "Status", { max: 30 }) ?? "Unregistered";
+  if (!STATUSES.has(status))
+    throw new Invalid(`Status must be one of: ${[...STATUSES].join(", ")}.`);
+
+  const [clash] = await db.select().from(schema.plots)
+    .where(eq(schema.plots.houseNo, houseNo));
+  if (clash)
+    throw new Invalid(`Plot ${houseNo} already exists. Edit that one instead.`);
+
+  /* New plots sort to the end rather than into the middle of the register:
+     the existing order follows the estate's own numbering, which is not
+     something a lexical sort would reproduce (7A sits between 7 and 12). */
+  const [last] = await db.select({ max: maxOf(schema.plots.sortOrder) }).from(schema.plots);
+  const sortOrder = (last?.max ?? 0) + 1;
+
+  const values = {
+    houseNo,
+    owner: str(b.owner, "Household name", { max: 200, required: false }),
+    status,
+    bf2025: nullableMoney(b.bf, "2025 balance") as any,
+    sortOrder,
+  };
+  const [row] = await db.insert(schema.plots).values(values).returning();
+  await audit(editor, "create", "plot", houseNo, values);
+  return json({ ok: true, row }, 201);
+}
+
+/**
+ * Remove a plot.
+ *
+ * collections.house_no cascades on delete, so removing a plot that has recorded
+ * payments would take its whole payment history with it and silently change the
+ * fund's totals. That is refused: a plot that has ever paid is part of the
+ * financial record. Marking it Unregistered or Vacant House keeps the history
+ * and takes it out of the fee count, which is what "remove" almost always means
+ * here.
+ */
+async function deletePlot(houseNo: string | undefined, editor: Editor) {
+  if (!houseNo) throw new Invalid("Missing plot number.");
+
+  const [existing] = await db.select().from(schema.plots)
+    .where(eq(schema.plots.houseNo, houseNo));
+  if (!existing) return json({ error: `Unknown plot '${houseNo}'.` }, 400);
+
+  const paid = await db.select({ id: schema.collections.id })
+    .from(schema.collections)
+    .where(eq(schema.collections.houseNo, houseNo));
+
+  if (paid.length) {
+    return json({
+      error: `Plot ${houseNo} has ${paid.length} recorded payment` +
+        (paid.length === 1 ? "" : "s") +
+        ", so deleting it would erase part of the financial record. " +
+        "Set its status to Unregistered or Vacant House instead — that removes " +
+        "it from the fee count but keeps its history.",
+    }, 409);
+  }
+
+  await db.delete(schema.plots).where(eq(schema.plots.houseNo, houseNo));
+  await audit(editor, "delete", "plot", houseNo, existing);
+  return json({ ok: true });
 }
 
 function nullableMoney(v: unknown, field: string) {

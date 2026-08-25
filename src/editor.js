@@ -566,15 +566,24 @@ function plotsTab() {
         el("td", {}, p.owner || el("span", { class: "muted" }, "—")),
         el("td", {}, p.status),
         el("td", { class: "num" }, p.bf == null ? "—" : int(p.bf)),
-        el("td", { class: "num" },
-          el("button", { class: "linkbtn", onClick: () => showPlotForm(p) }, "Edit")))));
+        el("td", { class: "num nowrap" },
+          el("button", { class: "linkbtn", onClick: () => showPlotForm(p) }, "Edit"),
+          " ",
+          el("button", {
+            class: "linkbtn danger",
+            onClick: () => confirmDelete(
+              `Remove plot ${p.house}${p.owner ? " (" + p.owner + ")" : ""} from the register?`,
+              () => mutate(`/api/edit/plots/${encodeURIComponent(p.house)}`, "DELETE",
+                null, `Plot ${p.house} removed.`)),
+          }, "Remove")))));
   };
   filter.addEventListener("input", draw);
   draw();
 
   return el("div", {},
     header("Plots and household names",
-      "Names are visible only here, to signed-in committee members. The public dashboard shows plot numbers only."),
+      "Names are visible only here, to signed-in committee members. The public dashboard shows plot numbers only.",
+      el("button", { class: "btn primary", onClick: () => showPlotForm(null) }, "Add plot")),
     el("div", { class: "toolbar" }, filter),
     el("div", { class: "tbl-scroll" },
       el("table", {},
@@ -586,19 +595,28 @@ function plotsTab() {
 }
 
 function showPlotForm(p) {
-  const house = el("input", { type: "text", maxlength: "20", required: true, value: p.house });
-  const owner = el("input", { type: "text", maxlength: "200", value: p.owner || "" });
+  const isNew = !p;
+  const house = el("input", {
+    type: "text", maxlength: "20", required: true,
+    value: p ? p.house : "", placeholder: isNew ? "e.g. 132 or 7A" : "",
+  });
+  const owner = el("input", { type: "text", maxlength: "200", value: p?.owner || "" });
   const status = el("select", {}, ...STATUSES.map((v) =>
-    el("option", { value: v, selected: p.status === v }, v)));
-  const bf = el("input", { type: "number", step: "0.01", value: p.bf ?? "" });
+    el("option", { value: v, selected: p ? p.status === v : v === "Occupied" }, v)));
+  const bf = el("input", { type: "number", step: "0.01", value: p?.bf ?? "" });
 
+  /* Renumbering rewrites the primary key and drags the collections along with
+     it, which is not obvious from a text field — so say so, but only once the
+     number has actually been changed. */
   const warn = el("p", { class: "warn wide", hidden: true },
     "Renumbering moves this plot's entire payment history with it.");
-  house.addEventListener("input", () => {
-    warn.hidden = house.value.trim() === p.house;
-  });
+  if (!isNew) {
+    house.addEventListener("input", () => {
+      warn.hidden = house.value.trim() === p.house;
+    });
+  }
 
-  modal(`Plot ${p.house}`,
+  modal(isNew ? "Add a plot" : `Plot ${p.house}`,
     el("div", { class: "grid2" },
       el("label", {}, "Plot number", house),
       el("label", {}, "Status", status),
@@ -606,13 +624,18 @@ function showPlotForm(p) {
       el("label", { class: "wide" }, "Household name", owner),
       el("label", {}, "2025 balance brought forward", bf),
       el("p", { class: "muted small wide" },
-        "Only plots marked Occupied are counted as owing the monthly fee."),
+        "Only plots marked Occupied are counted as owing the monthly fee. " +
+        "Household names stay on this page and never reach the public dashboard."),
     ),
-    () => mutate(`/api/edit/plots/${encodeURIComponent(p.house)}`, "PUT",
-      { house: house.value.trim(), owner: owner.value || null,
-        status: status.value, bf: bf.value || null },
-      house.value.trim() === p.house ? "Plot updated."
-        : `Plot renumbered to ${house.value.trim()}.`));
+    () => {
+      const body = {
+        house: house.value.trim(), owner: owner.value || null,
+        status: status.value, bf: bf.value || null,
+      };
+      if (isNew) return mutate("/api/edit/plots", "POST", body, `Plot ${body.house} added.`);
+      return mutate(`/api/edit/plots/${encodeURIComponent(p.house)}`, "PUT", body,
+        body.house === p.house ? "Plot updated." : `Plot renumbered to ${body.house}.`);
+    });
 }
 
 /* --------------------------------------------------------------- settings */
