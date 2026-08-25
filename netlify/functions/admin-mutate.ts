@@ -300,9 +300,9 @@ async function createPlot(b: any, editor: Editor) {
   if (clash)
     throw new Invalid(`Plot ${houseNo} already exists. Edit that one instead.`);
 
-  /* New plots sort to the end rather than into the middle of the register:
-     the existing order follows the estate's own numbering, which is not
-     something a lexical sort would reproduce (7A sits between 7 and 12). */
+  /* sort_order is kept only as a tiebreaker for anything that is not a plain
+     plot number. Display order is derived from the number itself in shape.ts,
+     so a new plot lands in its proper place without this column being right. */
   const [last] = await db.select({ max: maxOf(schema.plots.sortOrder) }).from(schema.plots);
   const sortOrder = (last?.max ?? 0) + 1;
 
