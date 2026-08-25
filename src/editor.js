@@ -582,8 +582,9 @@ function plotsTab() {
 
   return el("div", {},
     header("Plots and household names",
-      "Names are visible only here, to signed-in committee members. The public dashboard shows plot numbers only.",
-      el("button", { class: "btn primary", onClick: () => showPlotForm(null) }, "Add plot")),
+      "The register holds every plot on the estate, so nothing needs adding — edit a plot to record its household, " +
+      "change its status, or correct its number. Names are visible only here, to signed-in committee members; " +
+      "the public dashboard shows plot numbers only."),
     el("div", { class: "toolbar" }, filter),
     el("div", { class: "tbl-scroll" },
       el("table", {},
