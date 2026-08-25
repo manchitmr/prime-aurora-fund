@@ -10,9 +10,30 @@ const num = (v: unknown) => (v == null ? 0 : Number(v));
 
 export type Raw = Awaited<ReturnType<typeof loadAll>>;
 
+/**
+ * Order plots the way the estate numbers them: 6, 7, 7A, 12 … 131.
+ *
+ * A plain text sort scatters that (11 before 2, 7A adrift), and the stored
+ * sort_order column only holds the order the register happened to be imported
+ * in — it goes stale the moment a plot is added or renumbered. Deriving the
+ * order from the number itself is always right and needs no upkeep.
+ */
+const plotKey = (houseNo: string) => {
+  const m = /^(\d+)\s*([A-Za-z]*)$/.exec(String(houseNo).trim());
+  // anything not "digits + optional letters" sorts last, alphabetically
+  return m
+    ? { num: Number(m[1]), suffix: m[2].toUpperCase(), odd: 0 }
+    : { num: Number.MAX_SAFE_INTEGER, suffix: String(houseNo).toUpperCase(), odd: 1 };
+};
+
+export function byPlotNumber(a: { houseNo: string }, b: { houseNo: string }) {
+  const x = plotKey(a.houseNo), y = plotKey(b.houseNo);
+  return x.odd - y.odd || x.num - y.num || x.suffix.localeCompare(y.suffix);
+}
+
 export async function loadAll() {
-  const [plots, collections, transactions, projects, settingRows] = await Promise.all([
-    db.select().from(schema.plots).orderBy(asc(schema.plots.sortOrder)),
+  const [plotRows, collections, transactions, projects, settingRows] = await Promise.all([
+    db.select().from(schema.plots),
     db.select().from(schema.collections),
     db.select().from(schema.transactions).orderBy(asc(schema.transactions.txDate)),
     db.select().from(schema.projects).orderBy(asc(schema.projects.sortOrder)),
@@ -21,6 +42,8 @@ export async function loadAll() {
 
   const settings: Record<string, string> = {};
   for (const s of settingRows) settings[s.key] = s.value;
+
+  const plots = [...plotRows].sort(byPlotNumber);
 
   return { plots, collections, transactions, projects, settings, settingRows };
 }
