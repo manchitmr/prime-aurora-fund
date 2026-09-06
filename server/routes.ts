@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { Router } from "express";
-import { and, desc, eq, isNull } from "drizzle-orm";
+// max is aliased: the `str` helper below already takes a `max` parameter
+import { and, desc, eq, isNull, max as maxOf } from "drizzle-orm";
 import ExcelJS from "exceljs";
 import { db, schema } from "./db.ts";
 import { loadAll, buildPublic, buildPrivate } from "./shape.ts";
@@ -528,6 +529,72 @@ const isoDate = (v: unknown, field: string) => {
   return s;
 };
 
+/** Add a plot to the register. */
+async function createPlot(b: any, editor: Editor, res: any) {
+  const houseNo = str(b.house, "Plot number", { max: 20 })!;
+  const status = str(b.status, "Status", { max: 30 }) ?? "Unregistered";
+  if (!STATUSES.has(status))
+    throw new Invalid(`Status must be one of: ${[...STATUSES].join(", ")}.`);
+
+  const [clash] = await db.select().from(schema.plots)
+    .where(eq(schema.plots.houseNo, houseNo));
+  if (clash)
+    throw new Invalid(`Plot ${houseNo} already exists. Edit that one instead.`);
+
+  /* sort_order is kept only as a tiebreaker for anything that is not a plain
+     plot number. Display order is derived from the number itself in shape.ts,
+     so a new plot lands in its proper place without this column being right. */
+  const [last] = await db.select({ max: maxOf(schema.plots.sortOrder) }).from(schema.plots);
+  const sortOrder = (last?.max ?? 0) + 1;
+
+  const values = {
+    houseNo,
+    owner: str(b.owner, "Household name", { max: 200, required: false }),
+    status,
+    bf2025: nullableMoney(b.bf, "2025 balance") as any,
+    sortOrder,
+  };
+  const [row] = await db.insert(schema.plots).values(values).returning();
+  await audit(editor, "create", "plot", houseNo, values);
+  return res.status(201).json({ ok: true, row });
+}
+
+/**
+ * Remove a plot.
+ *
+ * collections.house_no cascades on delete, so removing a plot that has recorded
+ * payments would take its whole payment history with it and silently change the
+ * fund's totals. That is refused: a plot that has ever paid is part of the
+ * financial record. Marking it Unregistered or Vacant House keeps the history
+ * and takes it out of the fee count, which is what "remove" almost always means
+ * here.
+ */
+async function deletePlot(houseNo: string | undefined, editor: Editor, res: any) {
+  if (!houseNo) throw new Invalid("Missing plot number.");
+
+  const [existing] = await db.select().from(schema.plots)
+    .where(eq(schema.plots.houseNo, houseNo));
+  if (!existing) return res.status(400).json({ error: `Unknown plot '${houseNo}'.` });
+
+  const paid = await db.select({ id: schema.collections.id })
+    .from(schema.collections)
+    .where(eq(schema.collections.houseNo, houseNo));
+
+  if (paid.length) {
+    return res.status(409).json({
+      error: `Plot ${houseNo} has ${paid.length} recorded payment` +
+        (paid.length === 1 ? "" : "s") +
+        ", so deleting it would erase part of the financial record. " +
+        "Set its status to Unregistered or Vacant House instead — that removes " +
+        "it from the fee count but keeps its history.",
+    });
+  }
+
+  await db.delete(schema.plots).where(eq(schema.plots.houseNo, houseNo));
+  await audit(editor, "delete", "plot", houseNo, existing);
+  return res.json({ ok: true });
+}
+
 function nullableMoney(v: unknown, field: string) {
   const n = money(v, field, { required: false });
   return n == null ? null : String(n);
@@ -713,6 +780,8 @@ async function collection(method: string, b: any, editor: Editor, res: any) {
 }
 
 async function plot(method: string, houseNo: string | undefined, b: any, editor: Editor, res: any) {
+  if (method === "POST") return await createPlot(b, editor, res);
+  if (method === "DELETE") return await deletePlot(houseNo, editor, res);
   if (method !== "PUT") return res.status(405).json({ error: "Method not allowed." });
   if (!houseNo) throw new Invalid("Missing plot number.");
 
